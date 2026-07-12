@@ -230,9 +230,32 @@
 | 属性 | 规格 |
 |------|------|
 | 芯片系列 | ESP32-S31 |
+| CPU | **双核** 32-bit RISC-V 微处理器 (HP + LP) |
+| 最高主频 | **320 MHz** |
+| FPU | 每核一个单精度浮点单元 (FPU) |
+| SIMD | 128-bit 数据总线，支持 SIMD 指令（仅一核支持） |
+| 协处理器 | ULP-RISC-V 超低功耗协处理器 |
+| MMU | Sv32 两级页表地址转换 |
+| I-Cache | 每核私有指令缓存 |
+| D-Cache | 共享数据缓存 |
 | 制造工艺 | 40 nm |
+| 封装 | **QFN80 (8 × 8 mm)** |
+| 工作温度 | **-40 °C ~ 85 °C** |
 | 核心模组 | ESP32-S31-WROOM-3 |
 | 开发板 | ESP32-S31-Korvo-1 (V1.1) / ESP32-S31-Function-CoreBoard-1 |
+
+### 7.2 存储器
+
+| 存储器 | 规格 |
+|--------|------|
+| ROM | **320 KB** (通过专用 ROM 缓存访问) |
+| HP SRAM | **512 KB** 共享 SRAM |
+| LP SRAM | **32 KB** 低功耗 SRAM |
+| 外部 PSRAM 接口 | **250 MHz 8-bit DDR PSRAM** (仅支持封装内) |
+| Flash 接口 | SPI, Dual SPI, Quad SPI, Octal SPI, QPI, OPI |
+| Flash ICP | 支持 Flash 在线编程 (In-Circuit Programming) |
+| 并发访问 | 支持 Flash 和 PSRAM 并发访问 |
+| eFuse | eFuse 控制器 |
 
 ### 7.2 无线连接能力
 
@@ -245,11 +268,13 @@
 
 ### 7.3 主要特点
 
+- **双核** RISC-V 32-bit 处理器：HP 核 (高性能) + LP 核 (低功耗)，最高 320 MHz
+- 128-bit SIMD 数据总线
 - 40 nm 工艺，出色的功耗效率
-- 优秀的 RF 性能
-- 硬件安全特性（Flash 加密、安全启动、eFuse、HMAC、ECDSA、RSA）
-- 支持多种功耗模式（睡眠模式、ULP 协处理器）
-- 丰富的 GPIO 和外设接口
+- 优秀的 RF 性能（802.11b TX 最高 +20.5 dBm，802.11ax TX 最高 +19.5 dBm，BLE RX 灵敏度 -105 dBm @125Kbps）
+- 硬件安全特性（Flash/PSRAM 加密、安全启动、eFuse、HMAC、ECDSA、RSA、AES、SHA、ECC）
+- 支持多种功耗模式（Active、Modem-sleep、Light-sleep、Deep-sleep）
+- 丰富的 GPIO (60 个可编程 GPIO) 和外设接口
 
 ---
 
@@ -373,15 +398,17 @@
 | 资源 | 链接 |
 |------|------|
 | ESP32-S31 官方站点 | https://esp32-s31.espressif.com/en |
+| ESP32-S31 数据手册 (PDF) | [esp32-s31_datasheet_en.pdf](esp32-s31_datasheet_en.pdf) (本地) / [在线](https://www.espressif.com/documentation/esp32-s31_datasheet_en.pdf) |
 | Korvo-1 用户指南 | https://documentation.espressif.com/esp-dev-kits/en/latest/esp32s31/esp32-s31-korvo-1/index.html |
 | Function-CoreBoard-1 用户指南 | https://documentation.espressif.com/esp-dev-kits/en/latest/esp32s31/esp32-s31-function-coreboard-1/index.html |
 | ESP-IDF 编程指南 (ESP32-S31) | https://docs.espressif.com/projects/esp-idf/en/latest/esp32s31/index.html |
 | 技术参考手册 (TRM PDF) | https://www.espressif.com/sites/default/files/documentation/esp32-s31_technical_reference_manual_en.pdf |
+| 硬件参考 | https://docs.espressif.com/projects/esp-idf/en/latest/esp32s31/hw-reference/index.html |
 | 硬件设计指南 | https://documentation.espressif.com/esp-hardware-design-guidelines/en/latest/esp32s31/index.html |
 | ESP 产品选择器 | https://products.espressif.com/ |
 | 芯片系列对比 | https://products.espressif.com/#/product-comparison |
 | Espressif KiCad 库 | https://github.com/espressif/kicad-libraries |
-| 认证证书 | https://www.espressif.com/en/certificates?keys=ESP32-S31 |
-| 硬件论坛 | https://esp32.com/viewforum.php?f=12 |
-| esp_board_manager 组件 | ESP Component Registry |
+| 认证证书 | https://www.espressif.com/en/certificates |
+| 硬件论坛 | https://esp32.com/ |
 | Pinout & IO 分配 | https://esp32-s31.espressif.com/en/docs/6-Pinout%20%26%20IO%20Introduction/pinout-and-io-allocation |
+| 开发框架与解决方案 | https://esp32-s31.espressif.com/en/docs |
