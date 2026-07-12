@@ -2,7 +2,7 @@
 
 > **Framework**: ESP-IDF v6.x | **Language**: C++ (app) + C/C++ (components)
 > **Board**: ESP32-S31-Korvo-1 V1.1 | **Chip**: ESP32-S31 (RISC-V dual-core, up to 320 MHz)
-> **Docs**: [esp32s31_korvo1_hardware_info.md](doc/esp32s31_korvo1_hardware_info.md) (hardware) | [CLAUDE.md](../CLAUDE.md) (this file)
+> **Docs**: [README.md](../README.md) (hardware) | [PROJECT.md](../PROJECT.md) (software) | [PROJECT_REQUIREMENTS.md](../PROJECT_REQUIREMENTS.md) (requirements) | [esp32s31_korvo1_hardware_info.md](doc/esp32s31_korvo1_hardware_info.md) (detailed HW)
 
 ---
 
@@ -10,14 +10,16 @@
 
 **ALWAYS** at the start of every session:
 
-1. **Read** `doc/esp32s31_korvo1_hardware_info.md` — hardware info, peripherals, pin mapping
-2. **Read** `CLAUDE.md` — project-specific instructions
-3. **Plan** before starting any work
-4. **After finishing all tasks**:
-   - Update relevant documentation as needed
+1. **Read** `README.md` — hardware info, pin connections, build commands
+2. **Read** `PROJECT.md` — software architecture, project structure, code conventions
+3. **Read** `PROJECT_REQUIREMENTS.md` — requirements, pending items, change log
+4. **Read** `doc/esp32s31_korvo1_hardware_info.md` — detailed hardware, peripherals, chip specs
+5. **Plan** before starting any work
+6. **After finishing all tasks**:
+   - Update `README.md` / `PROJECT.md` / `PROJECT_REQUIREMENTS.md` as needed
    - Update this file if workflow/conventions change
    - Provide a summary of what was done, why, and remaining TODOs
-5. **If the project crashes**: check logs → find root cause → add diagnostic logs if unclear
+7. **If the project crashes**: check logs → find root cause → add diagnostic logs if unclear
 
 ---
 
