@@ -88,8 +88,8 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/git_info.h
 )
 
 idf_component_register(
-    SRCS "main.cpp"
-         "wifi_service.cpp"
+    SRCS "wifi_service.cpp" "main.cpp"
+        
          "web_config_server.cpp"
          "drivers/audio/audio_driver.cpp"
          "drivers/sdcard/sdcard_driver.cpp"
@@ -110,6 +110,7 @@ idf_component_register(
     INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/system_monitor" "logger"
     REQUIRES nvs_flash esp_wifi mdns cjson esp_http_server fatfs
              uorb ulog
+             wifi_manager captive_dns
     PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash
 )
 

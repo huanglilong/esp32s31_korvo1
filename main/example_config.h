@@ -1,6 +1,8 @@
 #pragma once
 #include "sdkconfig.h"
 #include "hal/gpio_types.h"
+#include "driver/i2c_master.h"
+#include <atomic>
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,12 +13,16 @@ extern "C" {
 #define NVS_KEY_WIFI_SSID             "ssid"
 #define NVS_KEY_WIFI_PASS             "pass"
 #define NVS_KEY_VOLUME                "volume"
+#define NVS_KEY_BRIGHTNESS            "brightness"
 #define NVS_KEY_CAM_STREAM            "cam_stream"
 
-/* ── Volume constants ───────────────────────────────────────────── */
+/* ── Volume / Brightness constants ──────────────────────────────── */
 #define VOLUME_MIN                    0
 #define VOLUME_MAX                    100
 #define VOLUME_DEFAULT                60
+#define BRIGHTNESS_MIN                20
+#define BRIGHTNESS_MAX                100
+#define BRIGHTNESS_DEFAULT            80
 
 /* ── WiFi event group bits ──────────────────────────────────────── */
 #define WIFI_CONNECTED_BIT            BIT0
@@ -44,6 +50,19 @@ extern "C" {
 
 /* ── mDNS ───────────────────────────────────────────────────────── */
 #define EXAMPLE_MDNS_HOST_NAME "esp-web"
+
+/* Shared mDNS initialization guard with reference counting.
+ * MUST be called after WiFi is connected (delegated hostname needs IP).
+ * Individual modules should only add/remove their own services,
+ * never call mdns_free() directly. */
+void shared_mdns_mutex_init(void);
+bool shared_mdns_ensure(void);
+void shared_mdns_release(void);
+void shared_mdns_update_delegate_ip(void);
+
+/* Returns the unique mDNS hostname (e.g. "esp-web-a1b2c3").
+ * Valid after shared_mdns_ensure() has been called. */
+const char *shared_mdns_hostname(void);
 
 #ifdef __cplusplus
 }

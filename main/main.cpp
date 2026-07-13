@@ -25,6 +25,8 @@
 #include "nvs.h"
 #include "esp_netif.h"
 #include "esp_mac.h"
+#include "mdns.h"
+#include "lwip/apps/netbiosns.h"
 
 #include "uorb.h"
 #include "ulog_writer.h"
@@ -41,18 +43,138 @@
 
 static const char *TAG = "main";
 
+/* ── Shared mDNS (reference-counted) ──────────────────────────────── */
+static SemaphoreHandle_t s_mdns_mutex = NULL;
+static int  s_mdns_refcount = 0;
+static bool s_mdns_initialized = false;
+
 /* ── mDNS hostname ──────────────────────────────────────────────── */
 static char s_mdns_unique_hostname[24] = {0};
 
+const char *shared_mdns_hostname(void)
+{
+    return s_mdns_unique_hostname;
+}
+
 static void _build_mdns_hostname() {
     uint8_t mac[6];
-    if (esp_efuse_mac_get_default(mac) == ESP_OK) {
+    /* Use base MAC for consistent hostname across reboots */
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK || esp_efuse_mac_get_default(mac) == ESP_OK) {
         snprintf(s_mdns_unique_hostname, sizeof(s_mdns_unique_hostname),
                  "esp-web-%02x%02x%02x", mac[3], mac[4], mac[5]);
     } else {
         strlcpy(s_mdns_unique_hostname, "esp-web", sizeof(s_mdns_unique_hostname));
     }
     ESP_LOGI(TAG, "Device mDNS hostname: %s", s_mdns_unique_hostname);
+}
+
+static SemaphoreHandle_t _mdns_mutex_get(void)
+{
+    return s_mdns_mutex;
+}
+
+void shared_mdns_mutex_init(void)
+{
+    if (!s_mdns_mutex) {
+        s_mdns_mutex = xSemaphoreCreateMutex();
+    }
+}
+
+bool shared_mdns_ensure(void)
+{
+    SemaphoreHandle_t mtx = _mdns_mutex_get();
+    if (mtx) xSemaphoreTake(mtx, portMAX_DELAY);
+
+    if (s_mdns_initialized) {
+        s_mdns_refcount++;
+        if (mtx) xSemaphoreGive(mtx);
+        return true;
+    }
+    if (mdns_init() != ESP_OK) {
+        if (mtx) xSemaphoreGive(mtx);
+        return false;
+    }
+
+    _build_mdns_hostname();
+
+    /* Primary hostname: "esp-web" — convenient for single-device use. */
+    mdns_hostname_set("esp-web");
+
+    /* Delegated hostname: "esp-web-XXXXXX" — unique per device. */
+    if (strcmp(s_mdns_unique_hostname, "esp-web") != 0) {
+        esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        esp_netif_ip_info_t ip_info;
+        if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK &&
+            ip_info.ip.addr != 0) {
+            static mdns_ip_addr_t s_delegate_addr = {};
+            s_delegate_addr.addr.u_addr.ip4 = ip_info.ip;
+            s_delegate_addr.addr.type = ESP_IPADDR_TYPE_V4;
+            s_delegate_addr.next = NULL;
+            mdns_delegate_hostname_add(s_mdns_unique_hostname, &s_delegate_addr);
+            ESP_LOGI(TAG, "mDNS: esp-web.local + %s.local -> " IPSTR,
+                     s_mdns_unique_hostname, IP2STR(&ip_info.ip));
+        } else {
+            mdns_delegate_hostname_add(s_mdns_unique_hostname, NULL);
+            ESP_LOGW(TAG, "mDNS: esp-web.local + %s.local (no IP yet)", s_mdns_unique_hostname);
+        }
+    } else {
+        ESP_LOGI(TAG, "mDNS: esp-web.local");
+    }
+
+    netbiosns_init();
+    netbiosns_set_name("esp-web");
+
+    s_mdns_initialized = true;
+    s_mdns_refcount = 1;
+
+    if (mtx) xSemaphoreGive(mtx);
+    return true;
+}
+
+void shared_mdns_release(void)
+{
+    SemaphoreHandle_t mtx = _mdns_mutex_get();
+    if (mtx) xSemaphoreTake(mtx, portMAX_DELAY);
+
+    if (!s_mdns_initialized) {
+        if (mtx) xSemaphoreGive(mtx);
+        return;
+    }
+    s_mdns_refcount--;
+    if (s_mdns_refcount <= 0) {
+        mdns_free();
+        s_mdns_initialized = false;
+        s_mdns_refcount = 0;
+        ESP_LOGI(TAG, "mDNS: fully deinitialized (last user released)");
+    }
+
+    if (mtx) xSemaphoreGive(mtx);
+}
+
+void shared_mdns_update_delegate_ip(void)
+{
+    SemaphoreHandle_t mtx = _mdns_mutex_get();
+    if (mtx) xSemaphoreTake(mtx, portMAX_DELAY);
+
+    if (!s_mdns_initialized || strcmp(s_mdns_unique_hostname, "esp-web") == 0) {
+        if (mtx) xSemaphoreGive(mtx);
+        return;
+    }
+
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip_info;
+    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK &&
+        ip_info.ip.addr != 0) {
+        static mdns_ip_addr_t s_delegate_addr = {};
+        s_delegate_addr.addr.u_addr.ip4 = ip_info.ip;
+        s_delegate_addr.addr.type = ESP_IPADDR_TYPE_V4;
+        s_delegate_addr.next = NULL;
+        mdns_delegate_hostname_set_address(s_mdns_unique_hostname, &s_delegate_addr);
+        ESP_LOGI(TAG, "mDNS delegate: %s.local -> " IPSTR,
+                 s_mdns_unique_hostname, IP2STR(&ip_info.ip));
+    }
+
+    if (mtx) xSemaphoreGive(mtx);
 }
 
 /* ── ULog startup ───────────────────────────────────────────────── */
@@ -119,10 +241,10 @@ extern "C" void app_main(void) {
     orb_init();
     ESP_LOGI(TAG, "uORB initialized");
 
-    /* 3. Build mDNS hostname */
-    _build_mdns_hostname();
+    /* 2a. Initialize shared mDNS mutex before any tasks */
+    shared_mdns_mutex_init();
 
-    /* 4. Mount SD card */
+    /* 3. Mount SD card */
     bool sd_ok = SDCardDriver::instance().init();
     if (sd_ok) {
         ESP_LOGI(TAG, "SD card mounted");

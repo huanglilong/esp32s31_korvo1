@@ -498,13 +498,13 @@ static void _register_handlers(httpd_handle_t server) {
 /* ── mDNS ────────────────────────────────────────────────────────── */
 
 static void _add_mdns_service(void) {
-    char hostname[32];
-    uint8_t mac[6];
-    if (esp_efuse_mac_get_default(mac) == ESP_OK) {
-        snprintf(hostname, sizeof(hostname), "esp-web-%02x%02x%02x", mac[3], mac[4], mac[5]);
-    } else {
-        strlcpy(hostname, "esp-web", sizeof(hostname));
+    /* Ensure mDNS is initialized (reference-counted, shared across modules) */
+    if (!shared_mdns_ensure()) {
+        ESP_LOGW(TAG, "mDNS init failed, skipping service registration");
+        return;
     }
+
+    const char *hostname = shared_mdns_hostname();
 
     mdns_txt_item_t txt[] = {
         {"path", "/"},
@@ -530,6 +530,7 @@ void web_config_server_start(void) {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 8080;
+    config.ctrl_port = 32769;  /* Different from captive portal's default 32768 */
     config.max_uri_handlers = 12;
     config.max_open_sockets = 8;
     config.lru_purge_enable = true;
