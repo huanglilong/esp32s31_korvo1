@@ -15,7 +15,7 @@
 #include "driver/i2s_std.h"
 #include <cstring>
 
-#include "example_config.h"
+#include "app_config.h"
 #include "topics.h"
 
 static const char *TAG = "AudioDriver";

@@ -11,7 +11,7 @@
 #include "driver/sdmmc_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
-#include "example_config.h"
+#include "app_config.h"
 #include <sys/stat.h>
 
 static const char *TAG = "SDCardDriver";

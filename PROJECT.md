@@ -42,7 +42,7 @@ esp32s31_korvo1/
 │   ├── CMakeLists.txt          # 主组件编译配置 (C++)
 │   ├── idf_component.yml       # 组件依赖声明 (mdns, cjson)
 │   ├── Kconfig.projbuild       # 项目 Kconfig 菜单 (SD/Audio/Camera/Logger/SysMon)
-│   ├── example_config.h        # 引脚/参数/NVS 键/常量 宏定义
+│   ├── app_config.h            # 引脚/参数/NVS 键/常量 宏定义
 │   ├── topics.h                # uORB topic 汇总 + ORB_TOPIC_DECLARE
 │   ├── main.cpp                # 主程序: NVS→SD→Audio→WiFi→WebConfig→Logger→ULog→SysMon
 │   ├── wifi_service.hpp/cpp    # WifiService — Wi-Fi STA+AP + SNTP + mDNS

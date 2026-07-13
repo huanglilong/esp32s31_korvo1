@@ -32,7 +32,7 @@
 #include "ulog_writer.h"
 #include "wifi_service.hpp"
 #include "web_config_server.hpp"
-#include "example_config.h"
+#include "app_config.h"
 #include "topics.h"
 
 #include "drivers/audio/audio_driver.hpp"

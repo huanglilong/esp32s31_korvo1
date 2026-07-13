@@ -14,7 +14,7 @@
 #include "esp_netif.h"
 #include "esp_sntp.h"
 
-#include "example_config.h"
+#include "app_config.h"
 #include "wifi_manager.h"
 #include "captive_dns.h"
 #include "generated/wifi_state.h"

@@ -39,7 +39,7 @@
 #include <cstdlib>
 #include <atomic>
 
-#include "example_config.h"
+#include "app_config.h"
 #include "wifi_service.hpp"
 #include "drivers/audio/audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
