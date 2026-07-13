@@ -60,7 +60,7 @@
 | 15 | 左声道音频功放 | NS4150B 低 EMI 3W D 类单声道功放 |
 | 16 | 左麦克风 | 板载左声道模拟麦克风，连接到音频编解码器 |
 | 17 | 左声道扬声器输出口 | 驱动 4Ω/3W 扬声器，引脚间距 2.00 mm |
-| 18 | RGB LED | 可寻址 RGB LED，由 **GPIO8** 驱动 |
+| 18 | RGB LED | 可寻址 RGB LED，由 **GPIO37** 驱动 (经 Q2 LBSS138LT1G 电平转换至 5V) |
 | 19 | 3.3V 转 1.8V LDO (NC) | 为 1.8V SPI NAND Flash 供电，默认不焊接 |
 | 20 | SPI NAND Flash (NC) | 四线 SPI NAND Flash，与 microSD 共享信号，默认不焊接 |
 | 21 | LCD 连接器 | 用于连接 LCD 子板 |
@@ -86,12 +86,14 @@
 
 ### 2.3 按键功能
 
-| 按键 | 功能 |
-|------|------|
-| PLAY | 播放/暂停控制 |
-| SET | 设置/模式切换 |
-| VOL- | 音量减小 |
-| VOL+ | 音量增大 |
+按键使用 ADC 电阻分压阵列，单引脚 `BT_ARRAY_ADC` (GPIO42, ADC 通道) 读取：
+
+| 按键 | 分压电阻 | ADC 电压 | 功能 |
+|------|---------|---------|------|
+| PLAY | 13KΩ (1%) | ~2.8V | 播放/暂停控制 |
+| SET | 6.8KΩ (1%) | ~2.4V | 设置/模式切换 |
+| VOL- | 3.3KΩ (1%) | ~1.8V | 音量减小 |
+| VOL+ | 1.3KΩ (1%) | ~1.0V | 音量增大 |
 
 ### 2.4 存储接口
 
@@ -150,18 +152,33 @@
 模拟麦克风 (左/右) → ES8389 模拟输入
 ```
 
-### 3.2 通信接口连接
+### 3.2 通信接口连接 (含 GPIO 映射, 来源: V1.1 原理图)
 
-| 外设 | 连接总线 | 说明 |
-|------|----------|------|
-| ES8389 音频编解码器 | I2S (数据) + I2C (控制) | 立体声音频采集和播放 |
-| microSD 卡 | SDIO 3.0 (4-bit) | 音频文件存储 |
-| DVP 摄像头 | DVP 并行接口 | 图像采集 |
-| USB-to-UART 桥接器 | UART | 烧录和串口调试 |
-| USB 2.0 OTG | USB 2.0 HS | USB Host，连接外部 USB 设备 |
-| 功能按键 (PLAY/SET/VOL-/VOL+) | GPIO | 用户交互 |
-| RGB LED | GPIO8 | 状态指示 |
-| LCD 子板 (可选) | 专用 LCD 接口 | 显示输出 |
+| 外设 | 连接总线 | ESP32-S31 GPIO | 说明 |
+|------|----------|---------------|------|
+| ES8389 I2C SDA | I2C | **GPIO0** (strapping pin) | 编解码器控制数据 |
+| ES8389 I2C SCL | I2C | **GPIO1** (strapping pin) | 编解码器控制时钟 |
+| ES8389 I2S MCLK | I2S | **GPIO42** | 主时钟输出 |
+| ES8389 I2S BCLK | I2S | **GPIO3** | 位时钟 |
+| ES8389 I2S LRCK | I2S | **GPIO4** | 左右声道时钟 |
+| ES8389 I2S DSDIN | I2S | **GPIO5** | DAC 数据输入 |
+| ES8389 I2S SDOUT | I2S | **GPIO6** | ADC 数据输出 |
+| NS4150B PA CTRL | GPIO | **GPIO43** | 功放使能 (高电平有效) |
+| microSD CLK | SDIO 3.0 | **GPIO24** | SD 时钟 |
+| microSD CMD | SDIO 3.0 | **GPIO25** | SD 命令 |
+| microSD D0 | SDIO 3.0 | **GPIO20** | SD 数据0 |
+| microSD D1 | SDIO 3.0 | **GPIO21** | SD 数据1 |
+| microSD D2 | SDIO 3.0 | **GPIO22** | SD 数据2 |
+| microSD D3 | SDIO 3.0 | **GPIO23** | SD 数据3 |
+| DVP D[7:0] (Y9:Y2) | DVP | **GPIO[53:46]** | 摄像头 8-bit 并行数据 |
+| DVP PCLK | DVP | **GPIO54** | 像素时钟 |
+| DVP HSYNC | DVP | **GPIO57** | 行同步 |
+| DVP VSYNC | DVP | **GPIO56** | 帧同步 |
+| DVP XCLK | DVP | **GPIO55** | 主时钟输出 (20MHz) |
+| CAM I2C (SDA/SCL) | I2C | **GPIO0/1** (共享) | OV3660 SCCB, 与 ES8389 共享 I2C 总线 |
+| 功能按键 | ADC | **GPIO42** (ADC) | 电阻分压阵列, 4 按键单引脚 |
+| RGB LED | GPIO | **GPIO37** → Q2 电平转换 → WS2812B | 状态指示 |
+| LCD 子板 (可选) | 专用 LCD 接口 | GPIO0/1/8-19/33-37/40/43-45/60-61 | 显示输出 |
 
 ---
 

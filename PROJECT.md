@@ -93,43 +93,44 @@ esp32s31_korvo1/
 
 ### Audio (ES8389)
 
-| Signal | Direction | Description |
-|:---|:---|:---|
-| I2S_MCLK | ESP32-S31 → ES8389 | 主时钟 |
-| I2S_SCLK | ↔ | 位时钟 (BCLK) |
-| I2S_LRCK | ↔ | 左右声道时钟 (WS) |
-| I2S_SDOUT | ← ES8389 | ADC 数据 (麦克风) |
-| I2S_SDIN | ESP32-S31 → | DAC 数据 (扬声器) |
-| I2C_SDA | ↔ | 配置与控制 |
-| I2C_SCL | ↔ | I2C 时钟 |
-| MIC_L/R | → ES8389 analog in | 模拟麦克风输入 |
-| PA_L/R | ← ES8389 → NS4150B | 功放输入 → 扬声器 |
+| Signal | Direction | ESP32-S31 GPIO | Description |
+|:---|:---|:---|:---|
+| I2C_SDA | ↔ | GPIO0 (strapping) | 配置数据 |
+| I2C_SCL | ↔ | GPIO1 (strapping) | 配置时钟 |
+| I2S_MCLK | ESP32-S31 → ES8389 | GPIO42 | 主时钟 |
+| I2S_SCLK | ↔ | GPIO3 | 位时钟 (BCLK) |
+| I2S_LRCK | ↔ | GPIO4 | 左右声道时钟 (WS) |
+| I2S_SDOUT | ← ES8389 | GPIO6 | ADC 数据 (麦克风) |
+| I2S_DSDIN | ESP32-S31 → | GPIO5 | DAC 数据 (扬声器) |
+| PA_CTRL | ESP32-S31 → NS4150B | GPIO43 | 功放使能 |
+| MIC_L/R | → ES8389 analog in | — | 模拟麦克风输入 |
+| PA_L/R | ← ES8389 → NS4150B | — | 功放输入 → 扬声器 |
 
 ### Buttons
 
-| Button | GPIO | Function |
+| Button | ADC 分压 | Function |
 |:---|:---|:---|
-| PLAY | TBD | 播放/暂停 |
-| SET | TBD | 设置/模式 |
-| VOL- | TBD | 音量减小 |
-| VOL+ | TBD | 音量增大 |
+| PLAY | ~2.8V (13KΩ) | 播放/暂停 |
+| SET | ~2.4V (6.8KΩ) | 设置/模式 |
+| VOL- | ~1.8V (3.3KΩ) | 音量减小 |
+| VOL+ | ~1.0V (1.3KΩ) | 音量增大 |
 
 ### RGB LED
 
 | LED | GPIO | Description |
 |:---|:---|:---|
-| WS2812 RGB | GPIO8 | 可寻址 RGB LED |
+| WS2812B RGB | GPIO37 → Q2 (电平转换) | 可寻址 RGB LED |
 
 ### microSD Card
 
-| Signal | Interface | Description |
-|:---|:---|:---|
-| SD_CLK | SDIO CLK | 时钟 |
-| SD_CMD | SDIO CMD | 命令 |
-| SD_D0 | SDIO DATA0 | 数据线 0 |
-| SD_D1 | SDIO DATA1 | 数据线 1 |
-| SD_D2 | SDIO DATA2 | 数据线 2 |
-| SD_D3 | SDIO DATA3 | 数据线 3 |
+| Signal | Interface | ESP32-S31 GPIO | Description |
+|:---|:---|:---|:---|
+| SD_CLK | SDIO CLK | GPIO24 | 时钟 |
+| SD_CMD | SDIO CMD | GPIO25 | 命令 |
+| SD_D0 | SDIO DATA0 | GPIO20 | 数据线 0 |
+| SD_D1 | SDIO DATA1 | GPIO21 | 数据线 1 |
+| SD_D2 | SDIO DATA2 | GPIO22 | 数据线 2 |
+| SD_D3 | SDIO DATA3 | GPIO23 | 数据线 3 |
 
 ## 代码规范
 

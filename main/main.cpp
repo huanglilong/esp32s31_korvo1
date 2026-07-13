@@ -63,9 +63,9 @@ static void _build_audio_config() {
     s_audio_cfg.aec_enabled = false;
 
     /* Power amplifier config */
-    s_audio_cfg.pa_cfg.port = -1;        /* PA controlled by ES8389, no GPIO */
+    s_audio_cfg.pa_cfg.port = 43;         /* GPIO43 controls NS4150B PA (CTRL pin) */
     s_audio_cfg.pa_cfg.gain = 0.0f;
-    s_audio_cfg.pa_cfg.active_level = 0;
+    s_audio_cfg.pa_cfg.active_level = 1;  /* Active high */
 
     /* I2C config */
     s_audio_cfg.i2c_cfg.port = AUDIO_I2C_NUM;

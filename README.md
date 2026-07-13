@@ -10,48 +10,51 @@
 - **Audio**: ES8389 立体声编解码器 (I2S + I2C) + NS4150B ×2 (3W D 类功放), 双模拟麦克风 + 双扬声器输出 (4Ω / 3W)
   |   Signal  |  ESP32-S31 GPIO |   Direction   |   ES8389  |
   |:----:|:----:|:----:|:----:|
-  |   I2C_SDA	|   TBD	|   ↔	|   I2C data  |
-  |   I2C_SCL	|   TBD	|   ↔	|   I2C clk   |
-  |   I2S_MCLK	|   TBD	|   →	|   MCLK      |
-  |   I2S_SCLK	|   TBD	|   ↔	|   BCLK      |
-  |   I2S_LRCK	|   TBD	|   ↔	|   LRCK/WS   |
-  |   I2S_SDOUT	|   TBD	|   ←	|   ADC data  |
-  |   I2S_SDIN	|   TBD	|   →	|   DAC data  |
+  |   I2C_SDA	|   GPIO0	|   ↔	|   I2C data (AD0=L, 7-bit addr 0x10)  |
+  |   I2C_SCL	|   GPIO1	|   ↔	|   I2C clk   |
+  |   I2S_MCLK	|   GPIO42	|   →	|   MCLK      |
+  |   I2S_SCLK	|   GPIO3	|   ↔	|   BCLK      |
+  |   I2S_LRCK	|   GPIO4	|   ↔	|   LRCK/WS   |
+  |   I2S_SDOUT	|   GPIO6	|   ←	|   ADC data  |
+  |   I2S_DSDIN	|   GPIO5	|   →	|   DAC data  |
+  |   PA_CTRL	|   GPIO43   |   → NS4150B |   功放使能 (高电平有效)  |
   |   PA_L	    |   NS4150B |   ← ES8389  |   左声道功放  |
   |   PA_R	    |   NS4150B |   ← ES8389  |   右声道功放  |
 
 - **microSD Card**: SDIO 3.0 (4-bit), 音频存储和播放
   |   Signal	  |   Interface   |   Description |
   |:----:|:----:|:----:|
-  |   SD_CLK	  |   SDIO CLK    |   Clock       |
-  |   SD_CMD	  |   SDIO CMD    |   Command     |
-  |   SD_D0	    |   SDIO DATA0  |   Data 0      |
-  |   SD_D1	    |   SDIO DATA1  |   Data 1      |
-  |   SD_D2	    |   SDIO DATA2  |   Data 2      |
-  |   SD_D3	    |   SDIO DATA3  |   Data 3      |
+  |   SD_CLK	  |   GPIO24    |   Clock       |
+  |   SD_CMD	  |   GPIO25    |   Command     |
+  |   SD_D0	    |   GPIO20  |   Data 0      |
+  |   SD_D1	    |   GPIO21  |   Data 1      |
+  |   SD_D2	    |   GPIO22  |   Data 2      |
+  |   SD_D3	    |   GPIO23  |   Data 3      |
 
 - **LCD Subboard** (可选): ESP32-S3-LCD-EV-Board-SUB3 (4.3 英寸), 通过专用 LCD 连接器连接
 
 - **DVP Camera** (可选): OV3660, 通过 DVP 摄像头连接器连接
   |   Signal    |   Interface   |   Description     |
   |:----:|:----:|:----:|
-  |   DVP_D[7:0]	|   DVP Data    |   8-bit 并行数据  |
-  |   DVP_PCLK	  |   DVP PCLK    |   像素时钟        |
-  |   DVP_HSYNC	|   DVP HSYNC   |   行同步          |
-  |   DVP_VSYNC	|   DVP VSYNC   |   帧同步          |
-  |   DVP_XCLK	  |   DVP XCLK    |   主时钟输出      |
+  |   DVP_D[7:0]	|   GPIO[53:46]  |   8-bit 并行数据 (Y9:Y2)  |
+  |   DVP_PCLK	  |   GPIO54    |   像素时钟        |
+  |   DVP_HSYNC	|   GPIO57   |   行同步          |
+  |   DVP_VSYNC	|   GPIO56   |   帧同步          |
+  |   DVP_XCLK	  |   GPIO55    |   主时钟输出      |
+  |   CAM_I2C_SDA	|   GPIO0 (共享) |   SCCB 数据 (与 ES8389 共享 I2C) |
+  |   CAM_I2C_SCL	|   GPIO1 (共享) |   SCCB 时钟 (与 ES8389 共享 I2C) |
   |   CAM_2.8V	  |   3.3→2.8V LDO |   摄像头 2.8V 供电 |
   |   CAM_1.5V	  |   3.3→1.5V LDO |   摄像头 1.5V 供电 |
 
 - **Buttons**:
-  |   Button  |   GPIO   |   Function   |
+  |   Button  |   ADC Voltage   |   Function   |
   |:----:|:----:|:----:|
-  |   PLAY   |   TBD   |   播放/暂停   |
-  |   SET    |   TBD   |   设置/模式   |
-  |   VOL-   |   TBD   |   音量减小    |
-  |   VOL+   |   TBD   |   音量增大    |
+  |   PLAY   |   ~2.8V (13KΩ)   |   播放/暂停   |
+  |   SET    |   ~2.4V (6.8KΩ)   |   设置/模式   |
+  |   VOL-   |   ~1.8V (3.3KΩ)   |   音量减小    |
+  |   VOL+   |   ~1.0V (1.3KΩ)   |   音量增大    |
 
-- **RGB LED**: 可寻址 RGB LED (WS2812 兼容), 由 **GPIO8** 驱动
+- **RGB LED**: 可寻址 RGB LED (WS2812B 兼容), 由 **GPIO37** 驱动 (经 LBSS138LT1G 电平转换)
 
 - **USB**:
   |   Port   |   Interface   |   Function   |

@@ -15,22 +15,22 @@ menu "ESP32-S31 Korvo-1 Configuration"
 
     config EXAMPLE_PIN_CLK
         int "SDMMC CLK pin"
-        default 36
+        default 24
     config EXAMPLE_PIN_CMD
         int "SDMMC CMD pin"
-        default 35
+        default 25
     config EXAMPLE_PIN_D0
         int "SDMMC D0 pin"
-        default 37
+        default 20
     config EXAMPLE_PIN_D1
         int "SDMMC D1 pin"
-        default 38
+        default 21
     config EXAMPLE_PIN_D2
         int "SDMMC D2 pin"
-        default 33
+        default 22
     config EXAMPLE_PIN_D3
         int "SDMMC D3 pin"
-        default 34
+        default 23
 
     # Audio
     config EXAMPLE_VOICE_VOLUME
@@ -39,10 +39,10 @@ menu "ESP32-S31 Korvo-1 Configuration"
         range 0 100
     config EXAMPLE_I2C_SCL_IO
         int "I2C SCL GPIO"
-        default 40
+        default 1
     config EXAMPLE_I2C_SDA_IO
         int "I2C SDA GPIO"
-        default 39
+        default 0
     config EXAMPLE_I2S_MCLK_IO
         int "I2S MCLK GPIO"
         default 42
@@ -69,40 +69,40 @@ menu "ESP32-S31 Korvo-1 Configuration"
             Typical values: 20 MHz for OV3660.
     config EXAMPLE_CAMERA_XCLK_IO
         int "DVP XCLK GPIO"
-        default 15
+        default 55
     config EXAMPLE_CAMERA_PCLK_IO
         int "DVP PCLK GPIO"
-        default 13
+        default 54
     config EXAMPLE_CAMERA_HSYNC_IO
         int "DVP HSYNC GPIO"
-        default 16
+        default 57
     config EXAMPLE_CAMERA_VSYNC_IO
         int "DVP VSYNC GPIO"
-        default 17
+        default 56
     config EXAMPLE_CAMERA_D0_IO
         int "DVP D0 GPIO"
-        default 10
+        default 46
     config EXAMPLE_CAMERA_D1_IO
         int "DVP D1 GPIO"
-        default 11
+        default 47
     config EXAMPLE_CAMERA_D2_IO
         int "DVP D2 GPIO"
-        default 12
+        default 48
     config EXAMPLE_CAMERA_D3_IO
         int "DVP D3 GPIO"
-        default 14
+        default 49
     config EXAMPLE_CAMERA_D4_IO
         int "DVP D4 GPIO"
-        default 21
+        default 50
     config EXAMPLE_CAMERA_D5_IO
         int "DVP D5 GPIO"
-        default 47
+        default 51
     config EXAMPLE_CAMERA_D6_IO
         int "DVP D6 GPIO"
-        default 48
+        default 52
     config EXAMPLE_CAMERA_D7_IO
         int "DVP D7 GPIO"
-        default 45
+        default 53
 
     # ── App Logger (SD card text log) ──
     choice APP_LOG_SD_LEVEL
