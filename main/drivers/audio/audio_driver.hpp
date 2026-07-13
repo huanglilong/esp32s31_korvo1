@@ -106,7 +106,8 @@ public:
      */
     int init(dev_audio_codec_config_t *cfg, int cfg_size, void **handle);
 
-    /** Deinitialize audio (refcounted). Thread-safe. */
+    /** Deinitialize audio (refcounted). Thread-safe.
+     *  Waits for in-flight codec operations before tearing down. */
     void deinit();
 
     /** @return true if audio is currently initialized */
@@ -157,8 +158,10 @@ private:
     esp_err_t _init_es8389_codec(const dev_audio_codec_config_t *cfg);
 
     SemaphoreHandle_t       _lifecycle_mutex;
+    std::atomic<SemaphoreHandle_t> _codec_mutex;
     std::atomic<int>        _refcount;
     std::atomic<int>        _volume;
+    std::atomic<int>        _codec_ops_in_flight;
 
     std::atomic<dev_audio_codec_handles_t*> _handles;
 
