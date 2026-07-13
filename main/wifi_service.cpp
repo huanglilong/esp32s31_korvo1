@@ -376,6 +376,11 @@ esp_err_t WifiService::connect(const char *ssid, const char *password) {
         return err;
     }
 
+    /* Save credentials to NVS BEFORE attempting to connect,
+     * so they persist even if the network is temporarily unavailable. */
+    _save_nvs_creds(ssid, password);
+    strlcpy(_current_ssid, ssid, sizeof(_current_ssid));
+
     err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "WiFi connect failed: %s", esp_err_to_name(err));
@@ -386,13 +391,11 @@ esp_err_t WifiService::connect(const char *ssid, const char *password) {
     EventBits_t bits = xEventGroupWaitBits(_wifi_event_group,
             WIFI_CONNECTED_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(15000));
     if (bits & WIFI_CONNECTED_BIT) {
-        _save_nvs_creds(ssid, password);
-        strlcpy(_current_ssid, ssid, sizeof(_current_ssid));
-        ESP_LOGI(TAG, "Connected to %s, credentials saved", ssid);
+        ESP_LOGI(TAG, "Connected to %s", ssid);
         return ESP_OK;
     }
 
-    ESP_LOGW(TAG, "Connect to %s timed out", ssid);
+    ESP_LOGW(TAG, "Connect to %s timed out (credentials saved, will retry on boot)", ssid);
     return ESP_ERR_TIMEOUT;
 }
 
