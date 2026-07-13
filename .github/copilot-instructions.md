@@ -92,8 +92,8 @@ idf.py flash monitor                                  # Flash firmware & monitor
 idf.py fullclean                                      # Full clean (only when config changed)
 ```
 
-**Linux**: `idf.py flash -b 3000000 -p /dev/ttyACM0 monitor`
-**macOS**: `idf.py flash -b 3000000 -p $(ls /dev/cu.usbmodem*) monitor`
+**Linux**: `idf.py flash -b 1500000 -p /dev/ttyACM0 monitor`
+**macOS**: `idf.py flash -b 1500000 -p $(ls /dev/cu.usbmodem*) monitor`
 
 After code changes, rebuild. If `sdkconfig.defaults` changed, `fullclean` first.
 
