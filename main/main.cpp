@@ -37,11 +37,99 @@
 
 #include "drivers/audio/audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
+#include "drivers/camera/camera_driver.hpp"
 #include "drivers/system_monitor/system_monitor.hpp"
 #include "logger/logger.hpp"
 #include "git_info.h"
 
 static const char *TAG = "main";
+
+/* ── Board device configs (esp_board_manager style) ────────────── */
+
+static dev_audio_codec_config_t s_audio_cfg = {};
+static dev_fs_fat_config_t s_sdcard_cfg = {};
+static dev_camera_config_t s_camera_cfg = {};
+
+static void _build_audio_config() {
+    s_audio_cfg.name = AUDIO_CODEC_NAME_DAC;
+    s_audio_cfg.chip = AUDIO_CODEC_CHIP;
+    s_audio_cfg.adc_enabled = true;
+    s_audio_cfg.dac_enabled = true;
+    s_audio_cfg.adc_max_channel = 2;
+    s_audio_cfg.dac_max_channel = 2;
+    s_audio_cfg.adc_init_gain = 0;
+    s_audio_cfg.dac_init_gain = 0;
+    s_audio_cfg.mclk_enabled = true;
+    s_audio_cfg.aec_enabled = false;
+
+    /* Power amplifier config */
+    s_audio_cfg.pa_cfg.port = -1;        /* PA controlled by ES8389, no GPIO */
+    s_audio_cfg.pa_cfg.gain = 0.0f;
+    s_audio_cfg.pa_cfg.active_level = 0;
+
+    /* I2C config */
+    s_audio_cfg.i2c_cfg.port = AUDIO_I2C_NUM;
+    s_audio_cfg.i2c_cfg.address = AUDIO_I2C_ADDR;
+    s_audio_cfg.i2c_cfg.frequency = AUDIO_I2C_FREQ;
+    s_audio_cfg.i2c_cfg.sda_io = (int16_t)CONFIG_EXAMPLE_I2C_SDA_IO;
+    s_audio_cfg.i2c_cfg.scl_io = (int16_t)CONFIG_EXAMPLE_I2C_SCL_IO;
+
+    /* I2S config */
+    s_audio_cfg.i2s_cfg.port = AUDIO_I2S_NUM;
+    s_audio_cfg.i2s_cfg.clk_src = 0;  /* I2S_CLK_SRC_DEFAULT */
+    s_audio_cfg.i2s_cfg.mclk_io = (int16_t)CONFIG_EXAMPLE_I2S_MCLK_IO;
+    s_audio_cfg.i2s_cfg.bclk_io = (int16_t)CONFIG_EXAMPLE_I2S_BCLK_IO;
+    s_audio_cfg.i2s_cfg.ws_io = (int16_t)CONFIG_EXAMPLE_I2S_WS_IO;
+    s_audio_cfg.i2s_cfg.dout_io = (int16_t)CONFIG_EXAMPLE_I2S_DOUT_IO;
+    s_audio_cfg.i2s_cfg.din_io = (int16_t)CONFIG_EXAMPLE_I2S_DIN_IO;
+    s_audio_cfg.i2s_cfg.sample_rate_hz = 48000;
+    s_audio_cfg.i2s_cfg.mclk_freq_hz = 48000 * 256;
+    s_audio_cfg.i2s_cfg.tx_aux_out_io = -1;
+}
+
+static void _build_sdcard_config() {
+    s_sdcard_cfg.name = "sdcard";
+    s_sdcard_cfg.mount_point = SDMMC_MOUNT_POINT;
+    s_sdcard_cfg.frequency = SDMMC_FREQ_HZ;
+    s_sdcard_cfg.vfs_config.format_if_mount_failed = false;
+    s_sdcard_cfg.vfs_config.max_files = 8;
+    s_sdcard_cfg.vfs_config.allocation_unit_size = 16 * 1024;
+    s_sdcard_cfg.sub_type = "sdmmc";
+
+    s_sdcard_cfg.sdmmc.slot = 0;
+    s_sdcard_cfg.sdmmc.bus_width = 4;
+    s_sdcard_cfg.sdmmc.slot_flags = SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+    s_sdcard_cfg.sdmmc.pins.clk = CONFIG_EXAMPLE_PIN_CLK;
+    s_sdcard_cfg.sdmmc.pins.cmd = CONFIG_EXAMPLE_PIN_CMD;
+    s_sdcard_cfg.sdmmc.pins.d0 = CONFIG_EXAMPLE_PIN_D0;
+    s_sdcard_cfg.sdmmc.pins.d1 = CONFIG_EXAMPLE_PIN_D1;
+    s_sdcard_cfg.sdmmc.pins.d2 = CONFIG_EXAMPLE_PIN_D2;
+    s_sdcard_cfg.sdmmc.pins.d3 = CONFIG_EXAMPLE_PIN_D3;
+}
+
+static void _build_camera_config() {
+    s_camera_cfg.name = "camera";
+    s_camera_cfg.type = "camera";
+    s_camera_cfg.sub_type = "dvp";
+
+    s_camera_cfg.sub_cfg.dvp.i2c_name = AUDIO_CODEC_NAME_ADC;  /* share I2C bus */
+    s_camera_cfg.sub_cfg.dvp.i2c_freq = AUDIO_I2C_FREQ;
+    s_camera_cfg.sub_cfg.dvp.reset_io = GPIO_NUM_NC;
+    s_camera_cfg.sub_cfg.dvp.pwdn_io = GPIO_NUM_NC;
+    s_camera_cfg.sub_cfg.dvp.xclk_freq = CONFIG_EXAMPLE_CAMERA_XCLK_FREQ;
+
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[0] = CONFIG_EXAMPLE_CAMERA_D0_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[1] = CONFIG_EXAMPLE_CAMERA_D1_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[2] = CONFIG_EXAMPLE_CAMERA_D2_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[3] = CONFIG_EXAMPLE_CAMERA_D3_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[4] = CONFIG_EXAMPLE_CAMERA_D4_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[5] = CONFIG_EXAMPLE_CAMERA_D5_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[6] = CONFIG_EXAMPLE_CAMERA_D6_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.data_io[7] = CONFIG_EXAMPLE_CAMERA_D7_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.pclk_io = CONFIG_EXAMPLE_CAMERA_PCLK_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.hsync_io = CONFIG_EXAMPLE_CAMERA_HSYNC_IO;
+    s_camera_cfg.sub_cfg.dvp.dvp_io.vsync_io = CONFIG_EXAMPLE_CAMERA_VSYNC_IO;
+}
 
 /* ── Shared mDNS (reference-counted) ──────────────────────────────── */
 static SemaphoreHandle_t s_mdns_mutex = NULL;
@@ -243,21 +331,33 @@ extern "C" void app_main(void) {
     /* 2a. Initialize shared mDNS mutex before any tasks */
     shared_mdns_mutex_init();
 
-    /* 3. Mount SD card */
-    bool sd_ok = SDCardDriver::instance().init();
+    /* 3. Build board device configs */
+    _build_audio_config();
+    _build_sdcard_config();
+    _build_camera_config();
+
+    /* 4. Mount SD card (config-driven) */
+    void *sdcard_handle = nullptr;
+    int sd_ret = SDCardDriver::instance().init(&s_sdcard_cfg, sizeof(s_sdcard_cfg), &sdcard_handle);
+    bool sd_ok = (sd_ret == 0);
     if (sd_ok) {
         ESP_LOGI(TAG, "SD card mounted");
     } else {
         ESP_LOGW(TAG, "SD card not available — audio playback/storage disabled");
     }
 
-    /* 5. Initialize audio driver */
-    AudioDriver::instance().init();
-    if (AudioDriver::instance().available()) {
+    /* 5. Initialize audio driver (config-driven) */
+    void *audio_handle = nullptr;
+    int audio_ret = AudioDriver::instance().init(&s_audio_cfg, sizeof(s_audio_cfg), &audio_handle);
+    if (audio_ret == 0) {
         ESP_LOGI(TAG, "Audio driver initialized");
     } else {
         ESP_LOGW(TAG, "Audio driver not available");
     }
+
+    /* 5a. Initialize camera driver (config-driven) */
+    void *camera_handle = nullptr;
+    CameraDriver::instance().init(&s_camera_cfg, sizeof(s_camera_cfg), &camera_handle);
 
     /* 6. Initialize WiFi service (which also initializes esp_netif) */
     ret = WifiService::instance().init();

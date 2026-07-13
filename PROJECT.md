@@ -49,7 +49,7 @@ esp32s31_korvo1/
 │   ├── web_config_server.hpp/cpp # Web 配置服务器 (port 8080 REST API + Web UI)
 │   ├── drivers/
 │   │   ├── audio/
-│   │   │   ├── audio_driver.hpp    # AudioDriver — ES8389 I2S+I2C + volume
+│   │   │   ├── audio_driver.hpp    # AudioDriver — ES8389 codec via esp_codec_dev (esp_board_manager API pattern)
 │   │   │   └── audio_driver.cpp
 │   │   ├── sdcard/
 │   │   │   ├── sdcard_driver.hpp   # SDCardDriver — SDIO 3.0 4-bit 卡管理

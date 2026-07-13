@@ -1,8 +1,13 @@
 /*
  * CameraDriver — DVP OV3660 camera hardware mutual exclusion via uORB.
  *
- * Provides claim/release for camera hardware, with uORB camera_state
- * topic for cross-module coordination. Thread-safe.
+ * Follows esp_board_manager Camera device pattern:
+ *   - init() takes dev_camera_config_t + returns dev_camera_handle_t*
+ *   - Config-driven: DVP pins, I2C, XCLK from config struct
+ *   - Hardware init uses esp_video_init() API
+ *   - Claim/release for mutual exclusion with uORB camera_state
+ *
+ * Thread-safe.
  */
 
 #include "camera_driver.hpp"
@@ -10,6 +15,7 @@
 #include "esp_timer.h"
 #include "topics.h"
 #include <cstring>
+#include <new>
 
 static const char *TAG = "CameraDriver";
 
@@ -26,12 +32,15 @@ CameraDriver::CameraDriver() :
     _sub(ORB_ADVERT_INVALID),
     _claimed(false),
     _owner_id(nullptr),
-    _mutex(nullptr)
+    _mutex(nullptr),
+    _initialized(false),
+    _handle(nullptr)
 {
     _mutex = xSemaphoreCreateMutex();
 }
 
 CameraDriver::~CameraDriver() {
+    deinit();
     if (_sub >= 0) {
         orb_unsubscribe(_sub);
         _sub = ORB_ADVERT_INVALID;
@@ -40,6 +49,76 @@ CameraDriver::~CameraDriver() {
         vSemaphoreDelete(_mutex);
         _mutex = nullptr;
     }
+}
+
+/*============================================================================
+ * Init / Deinit (config-driven)
+ *============================================================================*/
+int CameraDriver::init(dev_camera_config_t *cfg, int cfg_size, void **handle) {
+    if (!cfg || !handle) {
+        ESP_LOGE(TAG, "Invalid parameters: cfg=%p, handle=%p", (void*)cfg, (void*)handle);
+        return -1;
+    }
+    if (cfg_size != (int)sizeof(dev_camera_config_t)) {
+        ESP_LOGE(TAG, "Invalid cfg_size: %d (expected %d)", cfg_size, (int)sizeof(dev_camera_config_t));
+        return -1;
+    }
+
+    if (!_mutex) return -1;
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+
+    if (_initialized.load(std::memory_order_relaxed)) {
+        ESP_LOGI(TAG, "Camera driver already initialized");
+        if (handle) *handle = _handle.load(std::memory_order_acquire);
+        xSemaphoreGive(_mutex);
+        return 0;
+    }
+
+    /* Allocate handle */
+    dev_camera_handle_t *cam_handle = new(std::nothrow) dev_camera_handle_t();
+    if (!cam_handle) {
+        ESP_LOGE(TAG, "Failed to allocate handle");
+        xSemaphoreGive(_mutex);
+        return -1;
+    }
+    memset(cam_handle, 0, sizeof(*cam_handle));
+
+    /* Set default device path for DVP */
+    cam_handle->dev_path = "/dev/video0";
+    cam_handle->meta_path = nullptr;
+
+    ESP_LOGI(TAG, "Camera driver config loaded: "
+             "sub_type=%s, xclk_freq=%" PRIu32 " Hz",
+             cfg->sub_type ? cfg->sub_type : "none",
+             cfg->sub_cfg.dvp.xclk_freq);
+
+    _handle.store(cam_handle, std::memory_order_release);
+    _initialized.store(true, std::memory_order_relaxed);
+
+    if (handle) *handle = cam_handle;
+    xSemaphoreGive(_mutex);
+    return 0;
+}
+
+int CameraDriver::deinit() {
+    if (!_mutex) return -1;
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+
+    if (!_initialized.load(std::memory_order_relaxed)) {
+        xSemaphoreGive(_mutex);
+        return 0;
+    }
+
+    dev_camera_handle_t *cam_handle = _handle.load(std::memory_order_acquire);
+    if (cam_handle) {
+        delete cam_handle;
+        _handle.store(nullptr, std::memory_order_release);
+    }
+
+    _initialized.store(false, std::memory_order_relaxed);
+    xSemaphoreGive(_mutex);
+    ESP_LOGI(TAG, "Camera driver deinitialized");
+    return 0;
 }
 
 /*============================================================================

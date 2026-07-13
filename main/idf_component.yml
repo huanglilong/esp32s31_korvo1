@@ -3,6 +3,8 @@ dependencies:
     version: ^1.0
   espressif/cjson:
     version: ^1.7
+  espressif/esp_codec_dev:
+    version: ^1.5
   protocol_examples_common:
     path: ${IDF_PATH}/examples/common_components/protocol_examples_common
   idf:

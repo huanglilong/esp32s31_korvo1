@@ -60,6 +60,13 @@ menu "ESP32-S31 Korvo-1 Configuration"
         default 6
 
     # Camera DVP
+    config EXAMPLE_CAMERA_XCLK_FREQ
+        int "DVP XCLK Frequency (Hz)"
+        default 20000000
+        range 10000000 40000000
+        help
+            Master clock frequency output to the DVP camera sensor.
+            Typical values: 20 MHz for OV3660.
     config EXAMPLE_CAMERA_XCLK_IO
         int "DVP XCLK GPIO"
         default 15
