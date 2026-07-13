@@ -199,4 +199,21 @@ menu "ESP32-S31 Korvo-1 Configuration"
             Prevents alert flooding when a resource is persistently
             over threshold.
 
+    # ── SNTP Configuration ──
+    config SNTP_SERVER_0
+        string "NTP server hostname"
+        default "pool.ntp.org"
+        help
+            Primary NTP server for time synchronization. SNTP starts
+            automatically after WiFi STA connects. The default
+            pool.ntp.org works globally.
+
+    config SNTP_DEFAULT_TIMEZONE
+        string "Default timezone (POSIX TZ format)"
+        default "CST-8"
+        help
+            Default timezone applied at boot before any web API
+            overrides. Examples: UTC0 (UTC), CST-8 (China Standard
+            Time), EST5EDT (US Eastern), JST-9 (Japan).
+
 endmenu

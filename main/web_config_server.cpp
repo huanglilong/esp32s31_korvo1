@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_timer.h"
+#include "esp_sntp.h"
 #include "cJSON.h"
 #include "mdns.h"
 #include "nvs_flash.h"
@@ -38,16 +39,152 @@
 #include <cstring>
 #include <cstdlib>
 #include <atomic>
+#include <ctime>
 
 #include "app_config.h"
 #include "wifi_service.hpp"
 #include "drivers/audio/audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
 #include "drivers/system_monitor/system_monitor.hpp"
+#include "ulog_writer.h"
 
 static const char *TAG = "web_config";
 
 static httpd_handle_t s_httpd = nullptr;
+
+/* ── SNTP state ──────────────────────────────────────────────────── */
+static std::atomic<bool> s_sntp_initialized{false};
+static std::atomic<bool> s_sntp_synced{false};
+
+/* Saved timezone string (e.g. "CST-8") — persisted in NVS */
+static char s_timezone[32] = {};
+static std::atomic<bool> s_timezone_loaded{false};
+static SemaphoreHandle_t s_timezone_mutex = nullptr;  /* Protects s_timezone r/w */
+
+/* ── Timezone helpers ──────────────────────────────────────────────── */
+
+static void _load_timezone_from_nvs(void)
+{
+    /* Create mutex on first call */
+    if (!s_timezone_mutex) {
+        s_timezone_mutex = xSemaphoreCreateMutex();
+    }
+
+    if (s_timezone_loaded.load(std::memory_order_acquire)) return;
+
+    if (s_timezone_mutex) xSemaphoreTake(s_timezone_mutex, portMAX_DELAY);
+
+    /* Double-check after acquiring mutex */
+    if (s_timezone_loaded.load(std::memory_order_acquire)) {
+        if (s_timezone_mutex) xSemaphoreGive(s_timezone_mutex);
+        return;
+    }
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE_SETTINGS, NVS_READONLY, &h) == ESP_OK) {
+        size_t len = sizeof(s_timezone);
+        if (nvs_get_str(h, NVS_KEY_TIMEZONE, s_timezone, &len) == ESP_OK) {
+            ESP_LOGI(TAG, "Timezone loaded from NVS: %s", s_timezone);
+        }
+        nvs_close(h);
+    }
+
+    /* Default to Kconfig timezone if NVS has no timezone */
+    if (strlen(s_timezone) == 0) {
+        strlcpy(s_timezone, CONFIG_SNTP_DEFAULT_TIMEZONE, sizeof(s_timezone));
+    }
+
+    setenv("TZ", s_timezone, 1);
+    tzset();
+    s_timezone_loaded.store(true, std::memory_order_release);
+
+    if (s_timezone_mutex) xSemaphoreGive(s_timezone_mutex);
+}
+
+/* ── SNTP initialization ──────────────────────────────────────────── */
+
+/**
+ * @brief Start SNTP time sync and enable ULog wall-clock.
+ *
+ * Called once after WiFi STA gets an IP. Handles three cases:
+ *   1. Already synced (defensive) — just mark synced, enable ULog wall-clock
+ *   2. Already in progress — register callback for when sync completes
+ *   3. Fresh init — set NTP server, register callback, call esp_sntp_init()
+ *
+ * On sync: logs current time to console, sets s_sntp_synced=true,
+ *           enables ULog wall-clock timestamps.
+ */
+static void sntp_start_and_ulog_autostart(void)
+{
+    if (s_sntp_initialized.load(std::memory_order_acquire)) return;
+
+    /* Ensure timezone is loaded before SNTP starts */
+    _load_timezone_from_nvs();
+
+    /* 1. Already synced? (defensive) */
+    if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+        ulog_writer_t *ulog = ulog_writer_get();
+        ulog_writer_set_wall_clock(ulog, true);
+        WifiService::instance().set_sntp_synced();
+        s_sntp_synced.store(true, std::memory_order_release);
+        s_sntp_initialized.store(true, std::memory_order_release);
+        ESP_LOGI(TAG, "SNTP already synced (defensive check)");
+        return;
+    }
+
+    /* 2. Already in progress but not yet synced — just register callback */
+    if (esp_sntp_get_sync_status() != SNTP_SYNC_STATUS_RESET) {
+        s_sntp_initialized.store(true, std::memory_order_release);
+        esp_sntp_set_time_sync_notification_cb([](struct timeval *tv) {
+            struct tm tm;
+            localtime_r(&tv->tv_sec, &tm);
+            /* Snapshot s_timezone under mutex to avoid data race with HTTP POST handler */
+            char tz_snap[32] = {};
+            if (s_timezone_mutex && xSemaphoreTake(s_timezone_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+                xSemaphoreGive(s_timezone_mutex);
+            } else {
+                strlcpy(tz_snap, s_timezone, sizeof(tz_snap));  /* Best-effort fallback */
+            }
+            ESP_LOGI(TAG, "SNTP synchronized: %04d-%02d-%02d %02d:%02d:%02d (TZ=%s)",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                     tm.tm_hour, tm.tm_min, tm.tm_sec, tz_snap);
+            ulog_writer_t *ulog = ulog_writer_get();
+            ulog_writer_set_wall_clock(ulog, true);
+            WifiService::instance().set_sntp_synced();
+            s_sntp_synced.store(true, std::memory_order_release);
+        });
+        return;
+    }
+
+    /* 3. Fresh init */
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, CONFIG_SNTP_SERVER_0);
+
+    esp_sntp_set_time_sync_notification_cb([](struct timeval *tv) {
+        struct tm tm;
+        localtime_r(&tv->tv_sec, &tm);
+        /* Snapshot s_timezone under mutex to avoid data race with HTTP POST handler */
+        char tz_snap[32] = {};
+        if (s_timezone_mutex && xSemaphoreTake(s_timezone_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+            xSemaphoreGive(s_timezone_mutex);
+        } else {
+            strlcpy(tz_snap, s_timezone, sizeof(tz_snap));  /* Best-effort fallback */
+        }
+        ESP_LOGI(TAG, "SNTP synchronized: %04d-%02d-%02d %02d:%02d:%02d (TZ=%s)",
+                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                 tm.tm_hour, tm.tm_min, tm.tm_sec, tz_snap);
+        ulog_writer_t *ulog = ulog_writer_get();
+        ulog_writer_set_wall_clock(ulog, true);
+        WifiService::instance().set_sntp_synced();
+        s_sntp_synced.store(true, std::memory_order_release);
+    });
+    esp_sntp_init();
+    s_sntp_initialized.store(true, std::memory_order_release);
+    ESP_LOGI(TAG, "SNTP started with server %s — waiting for sync...",
+             CONFIG_SNTP_SERVER_0);
+}
 std::atomic<bool> s_server_running{false};
 
 /* ── HTML helpers ────────────────────────────────────────────────── */
@@ -155,7 +292,7 @@ async function setVolume() {
   const vol = parseInt(document.getElementById('volume').value);
   const data = await apiPost('/api/audio/volume', {volume:vol});
   if (data.error) { document.getElementById('vol-status').innerHTML = '<span class="error">' + data.error + '</span>'; }
-  else { document.getElementById('vol-status').textContent = '音量已设置为 ' + data.volume; nvsSet('volume', vol); }
+  else { document.getElementById('vol-status').textContent = '音量已设置为 ' + data.volume; }
 }
 
 async function refreshSysInfo() {
@@ -172,6 +309,9 @@ async function refreshSysInfo() {
     html += '<tr><td>SD 卡</td><td>' + (data.sdcard_mounted ? '已挂载' : '未检测到') + '</td></tr>';
     html += '<tr><td>空闲堆内存</td><td>' + (data.free_heap || 'N/A') + ' KB</td></tr>';
     html += '<tr><td>运行时间</td><td>' + (data.uptime || 'N/A') + ' 秒</td></tr>';
+    html += '<tr><td>NTP 同步</td><td>' + (data.sntp_synced ? '✅ 已同步' : '⏳ 未同步') + '</td></tr>';
+    html += '<tr><td>时区</td><td>' + (data.timezone || 'N/A') + '</td></tr>';
+    if (data.current_time) { html += '<tr><td>当前时间</td><td>' + data.current_time + '</td></tr>'; }
   }
   document.getElementById('sys-info').innerHTML = html;
 }
@@ -280,6 +420,9 @@ static esp_err_t _api_wifi_status(httpd_req_t *req) {
 
 /* GET /api/system/info */
 static esp_err_t _api_system_info(httpd_req_t *req) {
+    /* Ensure timezone is loaded before reporting */
+    _load_timezone_from_nvs();
+
     cJSON *root = cJSON_CreateObject();
 
     /* Chip info */
@@ -321,11 +464,129 @@ static esp_err_t _api_system_info(httpd_req_t *req) {
     /* SNTP status */
     cJSON_AddBoolToObject(root, "sntp_synced", WifiService::instance().sntp_synced());
 
+    /* Timezone (snapshot under mutex to avoid race with concurrent POST) */
+    {
+        char tz_snap[32] = {};
+        if (s_timezone_mutex && xSemaphoreTake(s_timezone_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+            xSemaphoreGive(s_timezone_mutex);
+        } else {
+            strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+        }
+        cJSON_AddStringToObject(root, "timezone", tz_snap);
+    }
+
+    /* Current wall-clock time (if synced) */
+    if (WifiService::instance().sntp_synced()) {
+        time_t now;
+        time(&now);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        char time_str[32];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+        cJSON_AddStringToObject(root, "current_time", time_str);
+    }
+
     char *json_str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
     cJSON_free(json_str);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* GET /api/system/timezone */
+static esp_err_t _api_timezone_get(httpd_req_t *req) {
+    _load_timezone_from_nvs();
+
+    cJSON *root = cJSON_CreateObject();
+
+    /* Timezone (snapshot under mutex) */
+    {
+        char tz_snap[32] = {};
+        if (s_timezone_mutex && xSemaphoreTake(s_timezone_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+            xSemaphoreGive(s_timezone_mutex);
+        } else {
+            strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+        }
+        cJSON_AddStringToObject(root, "timezone", tz_snap);
+    }
+    cJSON_AddBoolToObject(root, "sntp_synced", WifiService::instance().sntp_synced());
+
+    if (WifiService::instance().sntp_synced()) {
+        time_t now;
+        time(&now);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        char time_str[32];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+        cJSON_AddStringToObject(root, "current_time", time_str);
+    }
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* POST /api/system/timezone — body: {"timezone": "CST-8"} */
+static esp_err_t _api_timezone_set(httpd_req_t *req) {
+    char buf[128] = {};
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty body");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *tz_item = cJSON_GetObjectItem(json, "timezone");
+    if (!tz_item || !cJSON_IsString(tz_item)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'timezone' field");
+        return ESP_FAIL;
+    }
+
+    const char *new_tz = tz_item->valuestring;
+    if (strlen(new_tz) == 0 || strlen(new_tz) >= sizeof(s_timezone)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid timezone value");
+        return ESP_FAIL;
+    }
+
+    /* Apply timezone (protected by mutex against concurrent reads) */
+    if (s_timezone_mutex) xSemaphoreTake(s_timezone_mutex, portMAX_DELAY);
+    strlcpy(s_timezone, new_tz, sizeof(s_timezone));
+    setenv("TZ", s_timezone, 1);
+    tzset();
+    if (s_timezone_mutex) xSemaphoreGive(s_timezone_mutex);
+
+    /* Persist to NVS */
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE_SETTINGS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, NVS_KEY_TIMEZONE, s_timezone);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+
+    cJSON_Delete(json);
+    ESP_LOGI(TAG, "Timezone set to: %s", s_timezone);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "timezone", s_timezone);
+    char *json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+    cJSON_free(json_str);
+    cJSON_Delete(resp);
     return ESP_OK;
 }
 
@@ -492,6 +753,17 @@ static void _register_handlers(httpd_handle_t server) {
     uri.handler = _api_sdcard_info;
     httpd_register_uri_handler(server, &uri);
 
+    /* Timezone APIs */
+    uri.uri = "/api/system/timezone";
+    uri.method = HTTP_GET;
+    uri.handler = _api_timezone_get;
+    httpd_register_uri_handler(server, &uri);
+
+    uri.uri = "/api/system/timezone";
+    uri.method = HTTP_POST;
+    uri.handler = _api_timezone_set;
+    httpd_register_uri_handler(server, &uri);
+
     ESP_LOGI(TAG, "HTTP handlers registered");
 }
 
@@ -522,6 +794,75 @@ static void _add_mdns_service(void) {
 
 /* ── Public API ──────────────────────────────────────────────────── */
 
+/* Background task: waits for WiFi, starts SNTP on STA connect,
+ * auto-starts ULog after SNTP sync, and manages HTTP server
+ * lifecycle across WiFi up/down transitions. */
+static void _web_config_task(void *arg)
+{
+    ESP_LOGI(TAG, "Web config background task started");
+
+    /* Load timezone early (not dependent on WiFi) */
+    _load_timezone_from_nvs();
+
+    bool ulog_autostart_done = false;
+    bool prev_sta_up = false;
+    int sntp_log_counter = 0;  /* Throttle SNTP waiting log */
+
+    while (s_server_running.load(std::memory_order_acquire)) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        wifi_service_status_t st;
+        WifiService::instance().get_status(&st);
+
+        /* ── SNTP: start on first STA connect with IP ── */
+        if (st.sta_connected && !s_sntp_initialized.load(std::memory_order_acquire)) {
+            ESP_LOGI(TAG, "STA connected (IP=%s), starting SNTP...", st.sta_ip);
+            sntp_start_and_ulog_autostart();
+        }
+
+        /* Diagnostic: log SNTP waiting state periodically */
+        if (st.sta_connected && !s_sntp_synced.load(std::memory_order_acquire)) {
+            if (++sntp_log_counter >= 10) {  /* Every 10s */
+                sntp_log_counter = 0;
+                ESP_LOGI(TAG, "SNTP: waiting for time sync (server=%s, TZ=%s)...",
+                         CONFIG_SNTP_SERVER_0, s_timezone);
+            }
+        } else {
+            sntp_log_counter = 0;
+        }
+
+        /* ── ULog: auto-start once SNTP is synced and ULog is idle ── */
+        if (s_sntp_synced.load(std::memory_order_acquire) && !ulog_autostart_done) {
+            ulog_writer_t *ulog = ulog_writer_get();
+            ulog_state_t state = ulog_writer_get_state(ulog);
+            if (state == ULOG_STATE_IDLE) {
+                ulog_autostart_done = true;
+                esp_err_t err = ulog_writer_start(ulog);
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "ULog auto-started after SNTP sync");
+                } else {
+                    ESP_LOGW(TAG, "ULog auto-start failed: %s", esp_err_to_name(err));
+                }
+            } else if (state != ULOG_STATE_UNINIT) {
+                /* Already running (or errored) — stop polling */
+                ulog_autostart_done = true;
+            }
+        }
+
+        /* ── WiFi up/down tracking ── */
+        bool sta_up = st.sta_connected;
+        if (prev_sta_up && !sta_up) {
+            ESP_LOGW(TAG, "WiFi STA disconnected");
+        } else if (!prev_sta_up && sta_up) {
+            ESP_LOGI(TAG, "WiFi STA connected: ssid=%s ip=%s", st.sta_ssid, st.sta_ip);
+        }
+        prev_sta_up = sta_up;
+    }
+
+    ESP_LOGI(TAG, "Web config background task exiting");
+    vTaskDelete(NULL);
+}
+
 void web_config_server_start(void) {
     if (s_server_running.load(std::memory_order_acquire)) {
         ESP_LOGW(TAG, "Server already running");
@@ -531,7 +872,7 @@ void web_config_server_start(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 8080;
     config.ctrl_port = 32769;  /* Different from captive portal's default 32768 */
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 14;
     config.max_open_sockets = 8;
     config.lru_purge_enable = true;
     config.core_id = 0;
@@ -547,16 +888,28 @@ void web_config_server_start(void) {
 
     s_server_running.store(true, std::memory_order_release);
     ESP_LOGI(TAG, "Web config server started on port 8080");
+
+    /* Start background task for SNTP + ULog auto-start */
+    BaseType_t ret = xTaskCreate(_web_config_task, "web_cfg_bg",
+            4096, NULL, tskIDLE_PRIORITY + 2, NULL);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create web config background task");
+    }
 }
 
 void web_config_server_stop(void) {
     if (!s_server_running.load(std::memory_order_acquire)) return;
+
+    /* Signal background task to stop first */
+    s_server_running.store(false, std::memory_order_release);
+
+    /* Give background task time to notice the flag */
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     if (s_httpd) {
         httpd_stop(s_httpd);
         s_httpd = nullptr;
     }
 
-    s_server_running.store(false, std::memory_order_release);
     ESP_LOGI(TAG, "Web config server stopped");
 }

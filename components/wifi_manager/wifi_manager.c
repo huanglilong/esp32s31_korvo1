@@ -324,6 +324,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             }
             return;
 
+        case WIFI_EVENT_STA_CONNECTED: {
+            const wifi_event_sta_connected_t *conn = event_data;
+            ESP_LOGI(TAG, "STA associated: ssid=%.*s channel=%u auth=%u — waiting for DHCP...",
+                     conn->ssid_len, conn->ssid, conn->channel, conn->authmode);
+            return;
+        }
+
         case WIFI_EVENT_STA_DISCONNECTED: {
             const wifi_event_sta_disconnected_t *disc = event_data;
             uint16_t reason = disc ? disc->reason : 0;
@@ -364,6 +371,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         ip_event_got_ip_t *event = event_data;
         snprintf(s_ip_addr, sizeof(s_ip_addr), IPSTR, IP2STR(&event->ip_info.ip));
         s_connected = true;
+        ESP_LOGI(TAG, "STA got IP: %s (gw=" IPSTR ", mask=" IPSTR ")",
+                 s_ip_addr, IP2STR(&event->ip_info.gw), IP2STR(&event->ip_info.netmask));
         if (s_reconnect_timer) esp_timer_stop(s_reconnect_timer);
         if (wifi_manager_close_on_sta() && s_ap_active) {
             ESP_LOGI(TAG, "STA connected, closing AP per ap_behavior=close_on_sta");
@@ -377,6 +386,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         }
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         notify_state_changed(true);
+    }
+
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) {
+        ESP_LOGW(TAG, "STA lost IP address (DHCP lease expired or renewal failed)");
+        strlcpy(s_ip_addr, "0.0.0.0", sizeof(s_ip_addr));
+        if (s_connected) {
+            s_connected = false;
+            notify_state_changed(false);
+        }
+        /* Reconnect timer will trigger esp_wifi_connect() to re-associate
+         * and request a new DHCP lease. */
+        arm_reconnect();
     }
 }
 
@@ -420,6 +441,7 @@ esp_err_t wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_LOST_IP, &wifi_event_handler, NULL, NULL));
 
     const esp_timer_create_args_t timer_args = { .callback = reconnect_timer_cb, .name = "wifi_reconnect" };
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_reconnect_timer));

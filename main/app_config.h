@@ -15,6 +15,7 @@ extern "C" {
 #define NVS_KEY_VOLUME                "volume"
 #define NVS_KEY_BRIGHTNESS            "brightness"
 #define NVS_KEY_CAM_STREAM            "cam_stream"
+#define NVS_KEY_TIMEZONE              "timezone"
 
 /* ── Volume / Brightness constants ──────────────────────────────── */
 #define VOLUME_MIN                    0
@@ -45,6 +46,13 @@ extern "C" {
 #define AUDIO_I2S_DO_IO       static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2S_DOUT_IO)
 #define AUDIO_I2S_DI_IO       static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2S_DIN_IO)
 
+/* ── SNTP config ─────────────────────────────────────────────────── */
+#ifndef CONFIG_SNTP_SERVER_0
+#define CONFIG_SNTP_SERVER_0 "pool.ntp.org"
+#endif
+#ifndef CONFIG_SNTP_DEFAULT_TIMEZONE
+#define CONFIG_SNTP_DEFAULT_TIMEZONE "CST-8"
+#endif
 /* ── SD Card ────────────────────────────────────────────────────── */
 #define SDMMC_MOUNT_POINT     "/sdcard"
 

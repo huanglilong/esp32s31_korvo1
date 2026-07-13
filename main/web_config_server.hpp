@@ -10,7 +10,13 @@ extern "C" {
  * Launches an HTTP server on port 8080 with a web UI for configuring:
  *   - WiFi SSID / Password
  *   - Speaker Volume (0-100)
- *   - System information
+ *   - Timezone (GET/POST /api/system/timezone, Web UI selector)
+ *   - System information (including NTP sync status and current time)
+ *
+ * Also starts a background task that:
+ *   - Detects WiFi STA connection (GOT_IP) and starts SNTP time sync
+ *   - Auto-starts ULog logging after SNTP time is synced
+ *   - Logs WiFi up/down transitions and SNTP waiting state
  *
  * Settings are persisted to NVS namespace "settings".
  * Designed for headless boards without an LCD.
