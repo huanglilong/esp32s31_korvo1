@@ -92,13 +92,13 @@
     ```bash
     $ source ~/.espressif/v6.x/esp-idf/export.sh
     $ idf.py set-target esp32s31
-    $ idf.py build && idf.py flash -b 1500000 -p /dev/ttyACM0 monitor
+    $ idf.py build && idf.py flash -b 1500000 -p $(bash -c "ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1") monitor
     ```
   - macOS:
     ```bash
     $ source ~/.espressif/v6.x/esp-idf/export.sh
     $ idf.py set-target esp32s31
-    $ idf.py build && idf.py flash -b 1500000 -p $(ls /dev/cu.usbmodem*) monitor
+    $ idf.py build && idf.py flash -b 1500000 -p $(bash -c "ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null | head -1") monitor
     ```
 
 ### Software Features
