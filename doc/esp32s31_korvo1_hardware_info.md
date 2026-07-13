@@ -242,7 +242,7 @@
 | 封装 | **QFN80 (8 × 8 mm)** |
 | 工作温度 | **-40 °C ~ 85 °C** |
 | 核心模组 | ESP32-S31-WROOM-3 |
-| 开发板 | ESP32-S31-Korvo-1 (V1.1) / ESP32-S31-Function-CoreBoard-1 |
+| 开发板 | ESP32-S31-Korvo-1 (V1.1) |
 
 ### 7.2 存储器
 

@@ -4,8 +4,6 @@
   - **ESP32-S31-WROOM-3** 模组 (ESP32-S31 + 16MB SPI Flash + 16MB PSRAM, PCB 天线)
   - 芯片版本: ESP32-S31NRV16 / ESP32-S31NRV32, CPU 主频 320 MHz
   - 详细硬件信息: [doc/esp32s31_korvo1_hardware_info.md](doc/esp32s31_korvo1_hardware_info.md)
-- [ESP32-S31-Function-CoreBoard-1](https://documentation.espressif.com/esp-dev-kits/en/latest/esp32s31/esp32-s31-function-coreboard-1/index.html)
-  - ESP32-S31-WROOM-3 + ES8311 单声道音频 + 千兆以太网, GPIO 全引出
 
 ### External Peripherals (Korvo-1)
 
