@@ -1,0 +1,5 @@
+## IDF Component Dependency Manifest
+version: "1.0.0"
+description: "uORB for FreeRTOS — lightweight publish/subscribe message bus"
+dependencies:
+  idf: ">=5.0"

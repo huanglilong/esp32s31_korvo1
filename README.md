@@ -104,11 +104,15 @@
 ### Software Features
 
 - **Audio Pipeline**: 双模拟麦克风 → ES8389 ADC → I2S → ESP32-S31 处理 → I2S → ES8389 DAC → NS4150B PA → 扬声器
-- **Smart Audio**: 语音识别 + 语音唤醒, ESP-Skainet AI 语音助手 SDK
-- **HMI**: ESP-Brookesia 人机交互框架, 支持 4.3 英寸 LCD 图形 UI
-- **Multimedia**: ESP-GMF 通用多媒体框架, 音视频处理
-- **Camera**: DVP OV3660 摄像头, JPEG 编解码, PPA 像素处理加速
-- **Storage**: microSD 卡 (SDIO 3.0 4-bit), 音频文件存储和播放
-- **Wireless**: Wi-Fi 6 (ESP-NOW, WIFI-MESH, SmartConfig), BLE 5.4 (MESH, AUDIO), 802.15.4 (Matter, Thread, Zigbee)
-- **USB**: USB 2.0 HS OTG Host, USB Serial/JTAG 调试
-- **Development**: ESP-IDF v6.x, esp_board_manager 组件, C++ (main) + C/C++ (components)
+- **Audio Driver**: ES8389 立体声编解码器驱动, I2S 48kHz 16-bit 双工, 硬件音量控制, uORB 音量状态发布
+- **SD Card**: SDIO 3.0 4-bit 模式, FATFS 文件系统, boot 时自动挂载
+- **Camera**: DVP OV3660 摄像头驱动 (optional, mutex 互斥控制)
+- **WiFi**: 内置 Wi-Fi 6 STA + SoftAP 模式, NVS 凭证持久化, SNTP 时间同步
+- **mDNS**: esp-web-XXXXXX.local 主机名, Web Config 服务广告
+- **Web Config Server**: HTTP port 8080, WiFi 扫描/连接 REST API, 音量控制, 系统信息
+- **Logger**: 文本日志 (ESP_LOG → ring buffer → SD card /logs/app_NNNNNN.log)
+- **uORB**: PX4 风格 pub/sub 消息总线 (FreeRTOS queue), 10 个 topics
+- **ULog**: PX4 ULog 格式二进制日志 (SD 卡 .ulg 文件)
+- **System Monitor**: CPU 使用率 (per-core idle deltas), 内存抽样, uORB system_stats/alert
+- **Thread Safety**: std::atomic<T> 跨核保护, FreeRTOS Mutex 互斥, CAS lazy-init
+- **Build**: ESP-IDF v6.x, CMake, uORB 代码生成 (proto/*.msg → generated/*)

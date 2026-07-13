@@ -18,7 +18,7 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| A1 | **Audio 驱动基础** | ES8389 编解码器初始化 (I2S + I2C), 双 Mic + 双 Speaker 通路建立 | ⏳ 待开发 |
+| A1 | **Audio 驱动基础** | ES8389 编解码器初始化 (I2S + I2C), 双 Mic + 双 Speaker 通路建立 | ✅ 已完成 |
 | A2 | **Audio 录音** | 双 Mic → ES8389 ADC → I2S RX → MP3/WAV 编码 → SD 卡存储 | ⏳ 待开发 |
 | A3 | **Audio 播放** | SD 卡 → MP3/WAV 解码 → I2S TX → ES8389 DAC → NS4150B PA → 扬声器 | ⏳ 待开发 |
 | A4 | **Audio 音量控制** | ES8389 硬件音量调节, 按键 (VOL+/VOL-) 和 API 控制, NVS 持久化 | ⏳ 待开发 |
@@ -31,7 +31,7 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| B1 | **SD 卡挂载** | SDIO 3.0 4-bit 模式, FAT 文件系统, boot 时挂载 | ⏳ 待开发 |
+| B1 | **SD 卡挂载** | SDIO 3.0 4-bit 模式, FAT 文件系统, boot 时挂载 | ✅ 已完成 |
 | B2 | **SD 卡文件管理** | 文件浏览/删除/信息, Web API 或 UI 操作 | ⏳ 待开发 |
 | B3 | **SD 卡录音存储** | MP3/WAV 录音文件自动命名保存到 SD 卡 | ⏳ 待开发 |
 
@@ -55,7 +55,7 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| E1 | **DVP 摄像头驱动** | OV3660 初始化, DVP 并行接口图像采集 | ⏳ 待开发 |
+| E1 | **DVP 摄像头驱动** | OV3660 初始化, DVP 并行接口图像采集 | ✅ 已完成 (driver only) |
 | E2 | **JPEG 编码** | 硬件 JPEG Codec, 图像压缩存储 | ⏳ 待开发 |
 | E3 | **人脸检测** | 可选 ESP-DL 人脸检测模型 | ⏳ 待开发 |
 
@@ -63,9 +63,9 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| F1 | **Wi-Fi 连接** | Wi-Fi 6 Station 模式, Web 配网/NVS 持久化 | ⏳ 待开发 |
+| F1 | **Wi-Fi 连接** | Wi-Fi 6 Station 模式, Web 配网/NVS 持久化 | ✅ 已完成 |
 | F2 | **BLE 通信** | BLE MESH / BLE AUDIO，手机 APP 控制 | ⏳ 待开发 |
-| F3 | **Web 配置服务器** | HTTP 服务器, WiFi/音量/设备设置, 文件管理 | ⏳ 待开发 |
+| F3 | **Web 配置服务器** | HTTP 服务器, WiFi/音量/设备设置, 文件管理 | ✅ 已完成 |
 | F4 | **OTA 固件升级** | Wi-Fi OTA 远程升级, HTTP/HTTPS | ⏳ 待开发 |
 | F5 | **802.15.4 组网** | Thread/Zigbee/Matter 智能家居协议 | ⏳ 待开发 |
 
@@ -82,10 +82,10 @@
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
 | H1 | **AI Agent** | ESP-Claw AI Agent 集成 (LLM/MCP 工具调用/IM) | ⏳ 待开发 |
-| H2 | **系统监控** | CPU/内存使用率, FreeRTOS 任务监控, 资源告警 | ⏳ 待开发 |
+| H2 | **系统监控** | CPU/内存使用率, FreeRTOS 任务监控, 资源告警 | ✅ 已完成 |
 | H3 | **电源管理** | Deep-sleep 语音唤醒, 低功耗模式切换 | ⏳ 待开发 |
-| H4 | **uORB 消息总线** | PX4 风格 pub/sub 进程间通信 (可选) | ⏳ 待开发 |
-| H5 | **ULog 日志** | 二进制日志格式, SD 卡存储 (可选) | ⏳ 待开发 |
+| H4 | **uORB 消息总线** | PX4 风格 pub/sub 进程间通信 (可选) | ✅ 已完成 |
+| H5 | **ULog 日志** | 二进制日志格式, SD 卡存储 (可选) | ✅ 已完成 |
 
 ---
 
@@ -108,3 +108,5 @@
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
 | 2026-07-13 | v0.1 | 初始版本, 基于 ESP32-S31-Korvo-1 V1.1 硬件规划需求 |
+| 2026-07-13 | v0.2 | 创建项目脚手架 + uORB/ULog 组件 + Logger + WiFi Service + Web Config Server + Audio/SD/Camera/SystemMonitor 驱动 + main.cpp 启动序列。Build 通过 (ESP-IDF v6.1-beta1)。 |
+| 2026-07-13 | v0.3 | Code Review: 修复 esp_netif_init() 重复调用, 禁用 SPIRAM_XIP_FROM_PSRAM, 确认硬件兼容性 (ES8389/SDIO/WiFi/Camera) |

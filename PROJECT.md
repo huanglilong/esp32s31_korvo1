@@ -35,48 +35,58 @@
 
 ```
 esp32s31_korvo1/
-├── CMakeLists.txt              # 顶层项目配置
+├── CMakeLists.txt              # 顶层项目配置 + uORB 代码生成
 ├── sdkconfig.defaults          # 默认 Kconfig 配置
-├── partitions.csv              # 分区表
+├── partitions.csv              # 分区表 (OTA 双分区 + storage)
 ├── main/
 │   ├── CMakeLists.txt          # 主组件编译配置 (C++)
-│   ├── idf_component.yml       # 组件依赖声明
-│   ├── Kconfig.projbuild       # 项目 Kconfig 菜单
+│   ├── idf_component.yml       # 组件依赖声明 (mdns, cjson)
+│   ├── Kconfig.projbuild       # 项目 Kconfig 菜单 (SD/Audio/Camera/Logger/SysMon)
 │   ├── example_config.h        # 引脚/参数/NVS 键/常量 宏定义
-│   ├── main.cpp                # 主程序 (C++)
-│   ├── drivers/                # Driver 模块
+│   ├── topics.h                # uORB topic 汇总 + ORB_TOPIC_DECLARE
+│   ├── main.cpp                # 主程序: NVS→SD→Audio→WiFi→WebConfig→Logger→ULog→SysMon
+│   ├── wifi_service.hpp/cpp    # WifiService — Wi-Fi STA+AP + SNTP + mDNS
+│   ├── web_config_server.hpp/cpp # Web 配置服务器 (port 8080 REST API + Web UI)
+│   ├── drivers/
 │   │   ├── audio/
 │   │   │   ├── audio_driver.hpp    # AudioDriver — ES8389 I2S+I2C + volume
 │   │   │   └── audio_driver.cpp
 │   │   ├── sdcard/
-│   │   │   ├── sdcard_driver.hpp   # SDCardDriver — SDIO 3.0 卡管理
+│   │   │   ├── sdcard_driver.hpp   # SDCardDriver — SDIO 3.0 4-bit 卡管理
 │   │   │   └── sdcard_driver.cpp
 │   │   ├── camera/
 │   │   │   ├── camera_driver.hpp   # CameraDriver — OV3660 DVP 摄像头
 │   │   │   └── camera_driver.cpp
-│   │   └── buttons/
-│   │       ├── buttons_driver.hpp  # ButtonsDriver — PLAY/SET/VOL-/VOL+
-│   │       └── buttons_driver.cpp
-│   ├── audio_recorder.hpp     # 音频录音模块 (麦克风 → ES8389 → I2S → MP3/WAV)
-│   ├── audio_recorder.cpp
-│   ├── audio_player.hpp       # 音频播放模块 (SD 卡 → MP3/WAV → I2S → ES8389 → 扬声器)
-│   ├── audio_player.cpp
-│   ├── voice_wakeup.hpp       # 语音唤醒模块 (ESP-Skainet)
-│   ├── voice_wakeup.cpp
-│   ├── speech_recognition.hpp # 语音识别模块
-│   ├── speech_recognition.cpp
-│   ├── wifi_service.hpp       # WifiService — Wi-Fi 管理 + SNTP
-│   ├── wifi_service.cpp
-│   └── rgb_led.hpp            # RGB LED 控制 (GPIO8, WS2812)
-│   └── rgb_led.cpp
-├── components/                 # 本地/BSP 组件 (谨慎编辑)
-├── managed_components/         # ⚠️ ESP-IDF 管理 (禁止编辑)
-├── doc/                        # 项目文档
-│   ├── esp32s31_korvo1_hardware_info.md
-│   └── esp32-s31_datasheet_en.pdf
-├── README.md                   # 硬件信息 + 构建说明
-├── PROJECT_REQUIREMENTS.md     # 需求与变更记录
-└── CLAUDE.md                   # Copilot 指令引用
+│   │   └── system_monitor/
+│   │       ├── system_monitor.hpp  # SystemMonitor — CPU/内存采样 + uORB
+│   │       └── system_monitor.cpp
+│   ├── logger/
+│   │   ├── logger.hpp        # Text Logger — ESP_LOG → ring buffer → SD card
+│   │   └── logger.cpp
+│   ├── generated/            # ⚠️ 自动生成 — 由 tools/msg_gen.py 从 proto/*.msg 生成
+│   │   ├── wifi_state.h/cpp, volume_state.h/cpp, ...
+│   │   └── uORBTopics.hpp/cpp
+│   └── compat/               # 第三方兼容 shim
+├── components/
+│   ├── uorb/                 # PX4 风格 pub/sub 消息总线 (FreeRTOS queue)
+│   │   ├── CMakeLists.txt, idf_component.yml
+│   │   ├── include/uorb.h
+│   │   └── uorb.c
+│   └── ulog/                 # PX4 ULog 格式二进制日志 (SD 卡)
+│       ├── CMakeLists.txt, idf_component.yml, Kconfig.projbuild
+│       ├── include/ulog_writer.h, ulog_messages.h
+│       └── ulog_writer.cpp
+├── proto/                    # uORB topic 定义 (.msg, PX4 兼容)
+│   ├── wifi_state.msg, volume_state.msg, ...
+│   └── system_stats.msg, system_alert.msg
+├── tools/
+│   └── msg_gen.py            # .msg → C++ 代码生成器
+├── managed_components/       # ⚠️ ESP-IDF 管理 (禁止编辑)
+├── doc/                      # 项目文档
+├── README.md                 # 硬件信息 + 构建说明
+├── PROJECT.md                # 软件/架构/实现 (本文档)
+├── PROJECT_REQUIREMENTS.md   # 需求与变更记录
+└── CLAUDE.md                 # Copilot 指令引用
 ```
 
 ## 硬件接线参考

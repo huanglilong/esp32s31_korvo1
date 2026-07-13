@@ -1,0 +1,9 @@
+dependencies:
+  espressif/mdns:
+    version: ^1.0
+  espressif/cjson:
+    version: ^1.7
+  protocol_examples_common:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+  idf:
+    version: '>=5.3'

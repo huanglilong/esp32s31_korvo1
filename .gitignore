@@ -1,0 +1,27 @@
+# vscode
+**/.vscode
+**/build/
+
+# Log files
+*.log
+
+# ESP-IDF specific build outputs
+sdkconfig.old
+sdkconfig
+
+# ESP-IDF dependencies
+managed_components/**
+
+# Python environment files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.egg-info/
+dist/
+
+# Virtual environment folders
+venv/
+.venv/
+env/
+

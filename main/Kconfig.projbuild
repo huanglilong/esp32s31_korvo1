@@ -1,0 +1,202 @@
+menu "ESP32-S31 Korvo-1 Configuration"
+
+    # SD Card
+    config EXAMPLE_SDMMC_BUS_WIDTH_4
+        bool "SDMMC 4-line mode"
+        default y
+    choice EXAMPLE_SDMMC_SPEED_MODE
+        prompt "SD/MMC speed mode"
+        default EXAMPLE_SDMMC_SPEED_DS
+        config EXAMPLE_SDMMC_SPEED_DS
+            bool "Default Speed"
+        config EXAMPLE_SDMMC_SPEED_HS
+            bool "High Speed"
+    endchoice
+
+    config EXAMPLE_PIN_CLK
+        int "SDMMC CLK pin"
+        default 36
+    config EXAMPLE_PIN_CMD
+        int "SDMMC CMD pin"
+        default 35
+    config EXAMPLE_PIN_D0
+        int "SDMMC D0 pin"
+        default 37
+    config EXAMPLE_PIN_D1
+        int "SDMMC D1 pin"
+        default 38
+    config EXAMPLE_PIN_D2
+        int "SDMMC D2 pin"
+        default 33
+    config EXAMPLE_PIN_D3
+        int "SDMMC D3 pin"
+        default 34
+
+    # Audio
+    config EXAMPLE_VOICE_VOLUME
+        int "Speaker output volume"
+        default 80
+        range 0 100
+    config EXAMPLE_I2C_SCL_IO
+        int "I2C SCL GPIO"
+        default 40
+    config EXAMPLE_I2C_SDA_IO
+        int "I2C SDA GPIO"
+        default 41
+    config EXAMPLE_I2S_MCLK_IO
+        int "I2S MCLK GPIO"
+        default 42
+    config EXAMPLE_I2S_BCLK_IO
+        int "I2S BCLK GPIO"
+        default 3
+    config EXAMPLE_I2S_WS_IO
+        int "I2S WS GPIO"
+        default 4
+    config EXAMPLE_I2S_DOUT_IO
+        int "I2S DOUT GPIO"
+        default 5
+    config EXAMPLE_I2S_DIN_IO
+        int "I2S DIN GPIO"
+        default 6
+
+    # Camera DVP
+    config EXAMPLE_CAMERA_XCLK_IO
+        int "DVP XCLK GPIO"
+        default 15
+    config EXAMPLE_CAMERA_PCLK_IO
+        int "DVP PCLK GPIO"
+        default 13
+    config EXAMPLE_CAMERA_HSYNC_IO
+        int "DVP HSYNC GPIO"
+        default 16
+    config EXAMPLE_CAMERA_VSYNC_IO
+        int "DVP VSYNC GPIO"
+        default 17
+    config EXAMPLE_CAMERA_D0_IO
+        int "DVP D0 GPIO"
+        default 10
+    config EXAMPLE_CAMERA_D1_IO
+        int "DVP D1 GPIO"
+        default 11
+    config EXAMPLE_CAMERA_D2_IO
+        int "DVP D2 GPIO"
+        default 12
+    config EXAMPLE_CAMERA_D3_IO
+        int "DVP D3 GPIO"
+        default 14
+    config EXAMPLE_CAMERA_D4_IO
+        int "DVP D4 GPIO"
+        default 21
+    config EXAMPLE_CAMERA_D5_IO
+        int "DVP D5 GPIO"
+        default 47
+    config EXAMPLE_CAMERA_D6_IO
+        int "DVP D6 GPIO"
+        default 48
+    config EXAMPLE_CAMERA_D7_IO
+        int "DVP D7 GPIO"
+        default 45
+
+    # ── App Logger (SD card text log) ──
+    choice APP_LOG_SD_LEVEL
+        prompt "Minimum log level for SD card"
+        default APP_LOG_SD_LEVEL_INFO
+        config APP_LOG_SD_LEVEL_NONE
+            bool "None"
+        config APP_LOG_SD_LEVEL_ERROR
+            bool "Error"
+        config APP_LOG_SD_LEVEL_WARN
+            bool "Warning"
+        config APP_LOG_SD_LEVEL_INFO
+            bool "Info"
+        config APP_LOG_SD_LEVEL_DEBUG
+            bool "Debug"
+    endchoice
+
+    config APP_LOG_SD_LEVEL
+        int
+        default 0 if APP_LOG_SD_LEVEL_NONE
+        default 1 if APP_LOG_SD_LEVEL_ERROR
+        default 2 if APP_LOG_SD_LEVEL_WARN
+        default 3 if APP_LOG_SD_LEVEL_INFO
+        default 4 if APP_LOG_SD_LEVEL_DEBUG
+
+    config APP_LOG_MAX_FILE_SIZE_KB
+        int "Max log file size (KB)"
+        default 1024
+        range 64 10240
+        help
+            When the current log file reaches this size it is
+            closed and a new file is created.
+
+    config APP_LOG_MAX_FILES
+        int "Max retained log files"
+        default 5
+        range 1 100
+        help
+            Maximum number of log files to retain on the SD card.
+            Older files are deleted when this limit is exceeded.
+
+    config APP_LOG_RINGBUF_SIZE
+        int "Ring buffer size (bytes)"
+        default 8192
+        range 2048 65536
+        help
+            Internal ring buffer for decoupling log producers from
+            SD card writes.  Larger = less producer blocking, but
+            more RAM.
+
+    # ── System Performance Monitor ──
+    config APP_SYS_MONITOR_INTERVAL_MS
+        int "System monitor sampling interval (ms)"
+        default 5000
+        range 1000 60000
+        help
+            How often the SystemMonitor samples FreeRTOS task CPU
+            usage and heap memory. Shorter intervals give finer
+            granularity but consume more CPU.
+
+    config APP_SYS_MONITOR_LOG_INTERVAL
+        int "Log summary every N samples"
+        default 12
+        range 0 3600
+        help
+            Print a human-readable system stats summary via ESP_LOGI
+            every N sampling cycles. Set to 0 to disable periodic
+            logging (stats are still available via uORB / HTTP API).
+
+    config APP_SYS_MONITOR_TASK_STACK
+        int "Monitor task stack size (bytes)"
+        default 4096
+        range 2048 8192
+        help
+            Stack size for the background system monitor task.
+
+    config APP_SYS_MONITOR_CPU_ALERT_PCT
+        int "CPU usage alert threshold (%)"
+        default 90
+        range 50 99
+        help
+            Fire a CPU_HIGH alert when total CPU usage exceeds this
+            percentage. The alert includes the top CPU-consuming task.
+            Set to 100 to disable CPU alerts.
+
+    config APP_SYS_MONITOR_MEM_ALERT_PCT
+        int "Memory usage alert threshold (%)"
+        default 85
+        range 50 99
+        help
+            Fire a MEM_HIGH alert when internal SRAM or PSRAM usage
+            exceeds this percentage. Set to 100 to disable memory
+            alerts.
+
+    config APP_SYS_MONITOR_ALERT_COOLDOWN_S
+        int "Alert cooldown period (seconds)"
+        default 10
+        range 5 3600
+        help
+            Minimum time between repeated alerts of the same type.
+            Prevents alert flooding when a resource is persistently
+            over threshold.
+
+endmenu

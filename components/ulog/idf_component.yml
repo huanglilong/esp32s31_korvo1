@@ -1,0 +1,5 @@
+## IDF Component Dependency Manifest
+version: "1.0.0"
+description: "ULog writer — persist uORB topics to SD card in PX4 ULog format"
+dependencies:
+  idf: ">=5.0"

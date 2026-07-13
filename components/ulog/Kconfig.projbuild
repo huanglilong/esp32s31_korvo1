@@ -1,0 +1,101 @@
+menu "ULog Logger Configuration"
+
+    config ULOG_ENABLE
+        bool "Enable ULog file logging"
+        default n
+        help
+            Enable writing uORB topics to SD card in ULog format.
+            Logs are written to /sdcard/data/ (date or session based).
+
+    if ULOG_ENABLE
+
+        config ULOG_RINGBUF_SIZE
+            int "Ring buffer size (bytes)"
+            default 65536
+            range 4096 262144
+            help
+                Size of the internal ring buffer for decoupling data
+                collection from SD card writes. Larger buffers reduce
+                the chance of data loss during burst writes.
+                Default 64KB to accommodate camera frame topics (~8KB/frame).
+
+        config ULOG_FLUSH_INTERVAL_MS
+            int "File flush interval (ms)"
+            default 100
+            range 20 1000
+            help
+                How often to drain the ring buffer to the SD card file.
+                Lower values reduce data loss risk but increase I/O overhead.
+
+        config ULOG_SYNC_INTERVAL_MS
+            int "Sync marker interval (ms)"
+            default 500
+            range 100 5000
+            help
+                How often to insert SYNC markers in the data section for
+                crash recovery. Accepted by PX4 tools (Flight Review).
+
+        config ULOG_FSYNC_INTERVAL_MS
+            int "fsync interval (ms)"
+            default 1000
+            range 200 10000
+            help
+                How often to call fsync() to ensure data is written to
+                the SD card. More frequent fsync reduces data loss on
+                power failure but increases write latency.
+
+        config ULOG_DEFAULT_INTERVAL_MS
+            int "Default topic sampling interval (ms)"
+            default 100
+            range 10 5000
+            help
+                Default sampling interval for topics that don't specify
+                their own interval.
+
+        config ULOG_TASK_STACK_SIZE
+            int "Writer task stack size (bytes)"
+            default 8192
+            range 2048 16384
+            help
+                Stack size for the ULog writer FreeRTOS task.
+                Default 8KB: large data_buf for camera frames is heap-allocated.
+
+        config ULOG_TASK_PRIORITY
+            int "Writer task priority"
+            default 5
+            range 1 25
+            help
+                Priority of the ULog writer task. Higher = more CPU time
+                for draining the buffer.
+
+        config ULOG_MAX_CAPACITY_PCT
+            int "Max ULog storage (% of SD card capacity)"
+            default 70
+            range 10 95
+            help
+                Maximum percentage of SD card total capacity allocated
+                to .ulog files.  Oldest files are deleted to stay under
+                this limit.  70% on a 16 GB card = ~11 GB for logs.
+
+        config ULOG_MAX_FILE_SIZE
+            int "Max single log file size (bytes)"
+            default 104857600
+            range 1048576 1073741824
+            help
+                Maximum size of a single .ulg file before rotation.
+                When the current file reaches this size, it is closed
+                and a new file is created in the same directory.
+                Default: 100 MB (104857600 bytes).
+
+        config ULOG_MIN_KEEP_FILES
+            int "Minimum retained session files"
+            default 200
+            range 1 10000
+            help
+                Minimum number of .ulog files to keep, even if total
+                size exceeds the capacity percentage.  Prevents wiping
+                all data in a runaway high-rate logging scenario.
+
+    endif
+
+endmenu
