@@ -10,7 +10,7 @@
  *   5. WiFi init + start (STA or SoftAP provisioning)
  *   6. Web config server start
  *   7. Text logger start (SD card)
- *   8. ULog writer start (binary logging)
+ *   8. ULog writer init (auto-starts after SNTP sync via web_config_task)
  *   9. System monitor start
  */
 
@@ -177,11 +177,15 @@ void shared_mdns_update_delegate_ip(void)
     if (mtx) xSemaphoreGive(mtx);
 }
 
-/* ── ULog startup ───────────────────────────────────────────────── */
-static void _start_ulog() {
+/* ── ULog initialization (without start) ─────────────────────────── */
+/* ULog is initialized here (register topics, set git info), but NOT started.
+ * Actual start is deferred until SNTP time sync completes, handled by the
+ * web_config_task in web_config_server.cpp. This ensures ULog files get
+ * correct wall-clock timestamps. */
+static void _init_ulog() {
     ulog_init_config_t ulog_cfg = {};
     ulog_cfg.session_counter = 0;
-    ulog_cfg.has_wall_clock = WifiService::instance().sntp_synced();
+    ulog_cfg.has_wall_clock = false;  /* Will be set to true by SNTP callback */
     strlcpy(ulog_cfg.sys_name, "esp32s31_korvo1", sizeof(ulog_cfg.sys_name));
     strlcpy(ulog_cfg.ver_sw, GIT_COMMIT, sizeof(ulog_cfg.ver_sw));
     strlcpy(ulog_cfg.ver_hw, "ESP32-S31-Korvo-1", sizeof(ulog_cfg.ver_hw));
@@ -212,11 +216,7 @@ static void _start_ulog() {
         ulog_writer_add_topic(writer, ORB_ID(system_stats), 5000);
         ulog_writer_add_topic(writer, ORB_ID(volume_state), 1000);
 
-        if (ulog_writer_start(writer) == ESP_OK) {
-            ESP_LOGI(TAG, "ULog writer started");
-        } else {
-            ESP_LOGW(TAG, "ULog writer start failed");
-        }
+        ESP_LOGI(TAG, "ULog writer initialized (will auto-start after SNTP sync)");
     } else {
         ESP_LOGW(TAG, "ULog writer init failed (SD card not available?)");
     }
@@ -293,9 +293,9 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "  date:    %s", GIT_DATE);
     ESP_LOGI(TAG, "  message: %s", GIT_MSG);
 
-    /* 9. Start ULog writer (binary logging) */
+    /* 9. Initialize ULog writer (auto-starts after SNTP sync via web_config_task) */
     if (sd_ok) {
-        _start_ulog();
+        _init_ulog();
     }
 
     /* 10. Start system monitor */

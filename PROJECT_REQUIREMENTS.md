@@ -113,3 +113,4 @@
 | 2026-07-13 | v0.4 | SNTP 时间同步: 实现 WiFi STA 连接后自动 NTP 对时 (pool.ntp.org), 时区支持 (NVS 持久化 + Web API GET/POST /api/system/timezone), ULog 在 SNTP 同步后自动启动, 系统信息 API 增加 timezone/current_time 字段 |
 | 2026-07-14 | v0.4.1 | Git info 写入 log + ulog: main.cpp 启动时打印完整 git 信息 (branch/commit/author/date/message), text logger SD 卡文件头写入 git 版本信息, ulog 已有 git info 支持 (ver_sw_branch/commit/author/date/msg) |
 | 2026-07-14 | v0.5 | SNTP 修复: 修复 s_timezone 数据竞争 (SNTP 回调/HTTP handler 并发读取), 修复 Kconfig 默认时区不一致 (UTC0→CST-8), 添加 STA 关联/DHCP/IP 获取诊断日志, 添加 IP_EVENT_STA_LOST_IP 处理, 系统信息显示 NTP 同步状态和当前时间 |
+| 2026-07-14 | v0.5.1 | ULog 延迟启动: ULog 不再在 boot 时立即 start, 改为 SNTP 时间同步完成后由 web_config_task 自动 start (参考 esp32p4_monitor 实现)。确保 ULog 文件获得正确的 wall-clock 时间戳和日期命名。main.cpp 只做 init + add_topic, 不调用 ulog_writer_start()。 |

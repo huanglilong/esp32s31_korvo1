@@ -112,7 +112,7 @@
 - **Web Config Server**: HTTP port 8080, WiFi 扫描/连接 REST API, 音量控制, 系统信息
 - **Logger**: 文本日志 (ESP_LOG → ring buffer → SD card /logs/app_NNNNNN.log, 含 git info 文件头)
 - **uORB**: PX4 风格 pub/sub 消息总线 (FreeRTOS queue), 10 个 topics
-- **ULog**: PX4 ULog 格式二进制日志 (SD 卡 .ulg 文件, 含 git branch/commit/author/date/msg)
+- **ULog**: PX4 ULog 格式二进制日志 (SD 卡 .ulg 文件, 含 git branch/commit/author/date/msg, SNTP 同步后自动启动)
 - **System Monitor**: CPU 使用率 (per-core idle deltas), 内存抽样, uORB system_stats/alert
 - **Thread Safety**: std::atomic<T> 跨核保护, FreeRTOS Mutex 互斥, CAS lazy-init
 - **Build**: ESP-IDF v6.x, CMake, uORB 代码生成 (proto/*.msg → generated/*)
