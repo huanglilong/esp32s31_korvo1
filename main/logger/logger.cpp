@@ -15,6 +15,7 @@
 #include "logger.hpp"
 #include "sdkconfig.h"
 #include "esp_log.h"
+#include "git_info.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
@@ -553,6 +554,12 @@ static void _rotate_file(void)
     } else {
         fprintf(s_log.fd, "=== Log session #%d started (clock not set) ===\n", idx);
     }
+    /* Write git version info to log header */
+    fprintf(s_log.fd, "Git branch:  %s\n", GIT_BRANCH);
+    fprintf(s_log.fd, "Git commit:  %s\n", GIT_COMMIT);
+    fprintf(s_log.fd, "Git author:  %s\n", GIT_AUTHOR);
+    fprintf(s_log.fd, "Git date:    %s\n", GIT_DATE);
+    fprintf(s_log.fd, "Git message: %s\n", GIT_MSG);
     fflush(s_log.fd);
     fsync(fileno(s_log.fd));
 

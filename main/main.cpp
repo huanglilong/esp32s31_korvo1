@@ -225,7 +225,6 @@ static void _start_ulog() {
 /* ── Main ───────────────────────────────────────────────────────── */
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "ESP32-S31-Korvo-1 booting...");
-    ESP_LOGI(TAG, "Firmware: %s (%s)", GIT_LOG1, GIT_DATE);
     ESP_LOGI(TAG, "IDF version: %s", esp_get_idf_version());
 
     /* 1. Initialize NVS */
@@ -285,6 +284,14 @@ extern "C" void app_main(void) {
             ESP_LOGW(TAG, "Text logger init failed");
         }
     }
+
+    /* 8a. Print git info after logger init so it's saved to SD card */
+    ESP_LOGI(TAG, "Git Info: %s", GIT_LOG1);
+    ESP_LOGI(TAG, "  branch:  %s", GIT_BRANCH);
+    ESP_LOGI(TAG, "  commit:  %s", GIT_COMMIT);
+    ESP_LOGI(TAG, "  author:  %s", GIT_AUTHOR);
+    ESP_LOGI(TAG, "  date:    %s", GIT_DATE);
+    ESP_LOGI(TAG, "  message: %s", GIT_MSG);
 
     /* 9. Start ULog writer (binary logging) */
     if (sd_ok) {

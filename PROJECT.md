@@ -61,7 +61,7 @@ esp32s31_korvo1/
 │   │       ├── system_monitor.hpp  # SystemMonitor — CPU/内存采样 + uORB
 │   │       └── system_monitor.cpp
 │   ├── logger/
-│   │   ├── logger.hpp        # Text Logger — ESP_LOG → ring buffer → SD card
+│   │   ├── logger.hpp        # Text Logger — ESP_LOG → ring buffer → SD card (含 git info 文件头)
 │   │   └── logger.cpp
 │   ├── generated/            # ⚠️ 自动生成 — 由 tools/msg_gen.py 从 proto/*.msg 生成
 │   │   ├── wifi_state.h/cpp, volume_state.h/cpp, ...
@@ -72,7 +72,7 @@ esp32s31_korvo1/
 │   │   ├── CMakeLists.txt, idf_component.yml
 │   │   ├── include/uorb.h
 │   │   └── uorb.c
-│   └── ulog/                 # PX4 ULog 格式二进制日志 (SD 卡)
+│   └── ulog/                 # PX4 ULog 格式二进制日志 (SD 卡, 含 git info)
 │       ├── CMakeLists.txt, idf_component.yml, Kconfig.projbuild
 │       ├── include/ulog_writer.h, ulog_messages.h
 │       └── ulog_writer.cpp
