@@ -20,7 +20,6 @@
 #include "freertos/semphr.h"
 #include "driver/sdmmc_host.h"
 #include "sdmmc_cmd.h"
-#include <atomic>
 
 /* ── esp_board_manager-compatible config structures ────────────── */
 

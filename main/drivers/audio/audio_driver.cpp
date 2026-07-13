@@ -70,10 +70,14 @@ esp_err_t AudioDriver::_init_i2c_ctrl(const board_codec_i2c_t *i2c_cfg) {
     i2c_master_bus_handle_t bus_handle = nullptr;
     esp_err_t ret = i2c_new_master_bus(&bus_cfg, &bus_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create I2C bus: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to create I2C bus (port=%d, sda=%d, scl=%d): %s",
+                 (int)i2c_cfg->port, (int)i2c_cfg->sda_io, (int)i2c_cfg->scl_io,
+                 esp_err_to_name(ret));
         return ret;
     }
 
+    /* Let esp_codec_dev create its own I2C device on top of our bus.
+     * Pass bus_handle so it doesn't create another bus. */
     audio_codec_i2c_cfg_t i2c_ctrl_cfg = {
         .port = (uint8_t)i2c_cfg->port,
         .addr = (uint8_t)(i2c_cfg->address & 0xFF),
@@ -375,6 +379,7 @@ cleanup:
 }
 
 void AudioDriver::deinit() {
+    if (!_lifecycle_mutex) return;
     xSemaphoreTake(_lifecycle_mutex, portMAX_DELAY);
 
     int ref = _refcount.load(std::memory_order_relaxed);

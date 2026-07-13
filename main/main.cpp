@@ -357,7 +357,12 @@ extern "C" void app_main(void) {
 
     /* 5a. Initialize camera driver (config-driven) */
     void *camera_handle = nullptr;
-    CameraDriver::instance().init(&s_camera_cfg, sizeof(s_camera_cfg), &camera_handle);
+    int cam_ret = CameraDriver::instance().init(&s_camera_cfg, sizeof(s_camera_cfg), &camera_handle);
+    if (cam_ret == 0) {
+        ESP_LOGI(TAG, "Camera driver initialized");
+    } else {
+        ESP_LOGW(TAG, "Camera driver not available");
+    }
 
     /* 6. Initialize WiFi service (which also initializes esp_netif) */
     ret = WifiService::instance().init();

@@ -40,7 +40,7 @@ extern "C" {
 #define AUDIO_I2C_ADDR        (0x10)   /* ES8389 I2C address (7-bit, left-shifted) */
 #define AUDIO_I2C_FREQ        (400000) /* 400 kHz */
 
-/* ── Audio I2S ──────────────────────────────────────────────────── */
+/* ── Audio I2S Pinout ──────────────────────────────────────────── */
 #define AUDIO_I2S_NUM         (0)
 #define AUDIO_I2S_MCK_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2S_MCLK_IO)
 #define AUDIO_I2S_BCK_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2S_BCLK_IO)

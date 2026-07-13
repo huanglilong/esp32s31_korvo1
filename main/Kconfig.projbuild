@@ -42,7 +42,7 @@ menu "ESP32-S31 Korvo-1 Configuration"
         default 40
     config EXAMPLE_I2C_SDA_IO
         int "I2C SDA GPIO"
-        default 41
+        default 39
     config EXAMPLE_I2S_MCLK_IO
         int "I2S MCLK GPIO"
         default 42
