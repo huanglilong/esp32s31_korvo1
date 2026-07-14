@@ -14,7 +14,11 @@
  *          POST /api/system/timezone
  *   SDCard:GET  /api/sdcard/info
  *
- * Web UI: GET / — dual-mode page (Audio + File Manager tabs) + WiFi/Settings
+ * Web UI: GET / — 4-tab page with auto-refresh:
+ *   WiFi:    Auto-scan (10s), select SSID → password modal, no manual Scan/Connect
+ *   Audio:   Record (Start/Stop toggle + status), Music Player (auto-refresh 5s)
+ *   Files:   File manager with download/delete status bar updates
+ *   System:  System Info (auto-refresh 5s), Volume (real-time slider), ULog Record (Start/Stop toggle + status, auto-refresh 3s)
  *
  * mDNS: advertises _http._tcp on esp-web-XXXXXX.local:8080
  *
@@ -363,7 +367,7 @@ static const char *INDEX_HTML = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ESP32-S31 Korvo-1 配置</title>
+<title>ESP32-S31 Korvo-1</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 10px; max-width: 700px; margin: 0 auto; }
@@ -375,28 +379,26 @@ static const char *INDEX_HTML = R"rawliteral(
   .card h2 { font-size: 16px; color: #0f3460; background: #e94560; display: inline-block; padding: 3px 10px; border-radius: 6px; margin-bottom: 10px; }
   label { display: block; font-size: 13px; color: #aaa; margin-bottom: 3px; }
   input, select { width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #0f3460; color: #fff; font-size: 13px; margin-bottom: 10px; }
-  button { background: #e94560; color: #fff; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
-  button:hover { background: #d63851; }
+  button { background: #0f3460; color: #fff; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  button:hover { background: #1a5276; }
   button.sm { padding: 4px 10px; font-size: 12px; }
   button.green { background: #2ecc71; }
   button.red { background: #e74c3c; }
   button.gray { background: #555; }
-  .status { font-size: 12px; color: #0f0; margin-top: 6px; }
+  .status { font-size: 12px; color: #3498db; margin-top: 6px; }
   .error { color: #f44; }
   table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 6px; }
   td { padding: 3px 6px; border-bottom: 1px solid #333; }
   td:first-child { color: #888; }
   .flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .rec-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
-  .rec-dot.on { background: #e74c3c; animation: blink 1s infinite; }
-  .rec-dot.off { background: #555; }
-  @keyframes blink { 50% { opacity: 0.3; } }
   .hidden { display: none; }
-  .file-row { cursor: pointer; }
-  .file-row:hover { background: #1a3a5e; }
-  .file-row.selected { background: #0f3460; }
-  .progress { height: 4px; background: #333; border-radius: 2px; margin-top: 4px; }
-  .progress-bar { height: 100%; background: #e94560; border-radius: 2px; width: 0; }
+  .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:100; justify-content:center; align-items:center; }
+  .modal-overlay.show { display:flex; }
+  .modal { background:#16213e; border-radius:12px; padding:20px; max-width:320px; width:90%; }
+  .modal h3 { color:#e94560; margin-bottom:12px; font-size:15px; }
+  .modal label { font-size:13px; color:#aaa; margin-bottom:3px; }
+  .modal input { width:100%; padding:8px; border:1px solid #333; border-radius:8px; background:#0f3460; color:#fff; font-size:13px; margin-bottom:10px; }
+  .modal .flex { display:flex; gap:8px; justify-content:flex-end; }
 </style>
 </head>
 <body>
@@ -409,90 +411,81 @@ static const char *INDEX_HTML = R"rawliteral(
   <div class="tab" onclick="switchTab('system')">System</div>
 </div>
 
+<!-- WiFi Password Modal -->
+<div class="modal-overlay" id="wifi-modal">
+<div class="modal">
+  <h3 id="modal-ssid-label">Connect to WiFi</h3>
+  <label>Password</label>
+  <input type="password" id="modal-password" placeholder="WiFi Password" onkeydown="if(event.key==='Enter')connectFromModal();else if(['Shift','Control','Alt','Meta','CapsLock','Tab','Escape'].indexOf(event.key)>=0)return;else event.stopPropagation()">
+  <div class="flex">
+    <button class="gray sm" onclick="closeWifiModal()">Cancel</button>
+    <button onclick="connectFromModal()">Connect</button>
+  </div>
+</div>
+</div>
+
 <!-- WiFi Tab -->
 <div id="tab-wifi">
 <div class="card">
-  <h2>WiFi 扫描</h2>
-  <button onclick="scanWiFi()">扫描网络</button>
-  <div id="scan-status" class="status"></div>
-  <table id="scan-results"></table>
-</div>
-<div class="card">
-  <h2>WiFi 连接</h2>
-  <label>SSID</label><input type="text" id="ssid" placeholder="WiFi 名称">
-  <label>密码</label><input type="password" id="password" placeholder="WiFi 密码">
-  <button onclick="connectWiFi()">连接</button>
+  <h2>WiFi</h2>
   <div id="wifi-status" class="status"></div>
-</div>
-<div class="card">
-  <h2>音量控制</h2>
-  <div class="flex">
-    <input type="range" id="volume" min="0" max="100" value="60" oninput="document.getElementById('volume-val').textContent=this.value" style="flex:1">
-    <span id="volume-val" style="font-size:20px;">60</span>
-  </div>
-  <button onclick="setVolume()">设置音量</button>
-  <div id="vol-status" class="status"></div>
+  <table id="scan-results"></table>
 </div>
 </div>
 
 <!-- Audio Tab -->
 <div id="tab-audio" class="hidden">
 <div class="card">
-  <h2>录音</h2>
+  <h2>Record</h2>
   <div class="flex">
-    <button class="green" id="btn-rec-start" onclick="recStart()">开始录音</button>
-    <button class="red" id="btn-rec-stop" onclick="recStop()" disabled>停止录音</button>
-    <span id="rec-indicator"><span class="rec-dot off"></span>空闲</span>
+    <button class="green" id="btn-rec" onclick="recToggle()">▶</button>
+    <span id="rec-status" style="font-size:12px;color:#3498db">Stopped</span>
   </div>
-  <div id="rec-status" class="status"></div>
 </div>
 <div class="card">
-  <h2>音乐播放</h2>
-  <div class="flex" style="margin-bottom:8px">
-    <button class="sm" onclick="loadMusicList()">刷新列表</button>
-    <button class="sm gray" id="btn-stop-play" onclick="stopPlay()" disabled>停止</button>
-  </div>
-  <div id="music-list" style="max-height:200px;overflow-y:auto;"></div>
-  <div id="play-status" class="status"></div>
+  <h2>Music Player</h2>
+  <div id="music-list" style="max-height:300px;overflow-y:auto;font-size:13px"></div>
+  <div id="play-status" style="font-size:12px;color:#3498db;margin-top:6px">Stopped</div>
 </div>
 </div>
 
 <!-- Files Tab -->
 <div id="tab-files" class="hidden">
 <div class="card">
-  <h2>文件管理器</h2>
-  <div class="flex" style="margin-bottom:8px">
-    <button class="sm" onclick="loadFileList('/')">根目录</button>
-    <button class="sm gray" id="btn-fm-del-sel" onclick="deleteSelected()" disabled>删除选中</button>
-    <button class="sm gray" onclick="downloadSelected()">下载选中</button>
-  </div>
-  <div id="fm-current" style="font-size:12px;color:#aaa;margin-bottom:4px;">/</div>
-  <div id="fm-capacity" style="font-size:11px;color:#666;margin-bottom:4px;"></div>
-  <div id="fm-list" style="max-height:300px;overflow-y:auto;"></div>
-  <div id="fm-status" class="status"></div>
+  <h2>File Manager</h2>
+  <div id="fm_breadcrumb" style="font-size:13px;color:#e94560;margin-bottom:4px;">/</div>
+  <div id="fm_capacity" style="font-size:11px;color:#666;margin-bottom:4px;"></div>
+  <div id="fm_list" style="max-height:400px;overflow-y:auto;font-size:13px"></div>
+  <div id="fm_status" class="status"></div>
 </div>
 </div>
 
 <!-- System Tab -->
 <div id="tab-system" class="hidden">
 <div class="card">
-  <h2>系统信息</h2>
-  <button onclick="refreshSysInfo()">刷新</button>
+  <h2>System Info</h2>
   <table id="sys-info"></table>
 </div>
 <div class="card">
-  <h2>ULog 记录</h2>
-  <div class="flex" style="margin-bottom:6px">
-    <span id="ulog-indicator"><span class="rec-dot off"></span>已停止</span>
-    <button class="sm green" id="btn-ulog-start" onclick="ulogStart()">启动</button>
-    <button class="sm red" id="btn-ulog-stop" onclick="ulogStop()" disabled>停止</button>
+  <h2>Volume</h2>
+  <div class="flex">
+    <input type="range" id="volume" min="0" max="100" value="60" oninput="onVolumeSlide(this.value)" style="flex:1">
+    <span id="volume-val" style="font-size:20px;">60</span>
   </div>
-  <div id="ulog-status" style="font-size:12px;color:#aaa;"></div>
+  <div id="vol-status" class="status"></div>
+</div>
+<div class="card">
+  <h2>ULog Record</h2>
+  <div class="flex">
+    <button class="sm green" id="btn-ulog" onclick="ulogToggle()">▶</button>
+    <span id="ulog-status" style="font-size:12px;color:#3498db">Stopped</span>
+  </div>
 </div>
 </div>
 
 <script>
-var fmMode=false, fmCurrent='/', fmSelected=[];
+var fmCurrentDir='/';
+var _scanTimer=null, _musicTimer=null, _sysInfoTimer=null, _ulogTimer=null, _recPollTimer=null;
 
 async function apiGet(p) { try { let r=await fetch(p); return await r.json(); } catch(e) { return {error:e.message}; } }
 async function apiPost(p, b) { try { let r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return await r.json(); } catch(e) { return {error:e.message}; } }
@@ -502,182 +495,272 @@ function switchTab(t) {
     document.getElementById('tab-'+x).classList.toggle('hidden', x!==t);
   });
   document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active', el.textContent.trim().toLowerCase().indexOf(t)>=0 || (t==='system' && el.textContent.trim()==='System')));
-  if (t==='audio') loadMusicList();
-  if (t==='files') loadFileList('/');
-  if (t==='system') { refreshSysInfo(); refreshUlogStatus(); }
+  if(_scanTimer){clearInterval(_scanTimer);_scanTimer=null}
+  if(_musicTimer){clearInterval(_musicTimer);_musicTimer=null}
+  if(_sysInfoTimer){clearInterval(_sysInfoTimer);_sysInfoTimer=null}
+  if(_ulogTimer){clearInterval(_ulogTimer);_ulogTimer=null}
+  if(t==='wifi'){scanWiFi();_scanTimer=setInterval(scanWiFi,10000)}
+  if(t==='audio'){loadMusicList();_musicTimer=setInterval(loadMusicList,5000)}
+  if(t==='files') loadFileManager('/');
+  if(t==='system'){refreshSysInfo();_sysInfoTimer=setInterval(refreshSysInfo,5000);refreshUlogStatus();_ulogTimer=setInterval(refreshUlogStatus,3000)}
 }
 
+/* ── WiFi: auto-scan + Connect button + password modal ── */
+var _modalSsid='';
 async function scanWiFi() {
-  document.getElementById('scan-status').textContent='正在扫描...';
   let d=await apiGet('/api/wifi/scan');
-  if(d.error){ document.getElementById('scan-status').innerHTML='<span class="error">'+d.error+'</span>'; return; }
-  document.getElementById('scan-status').textContent='找到 '+(d.networks?d.networks.length:0)+' 个网络';
-  let h='<tr><td>SSID</td><td>信号</td><td></td></tr>';
+  if(d.error) return;
+  let st=await apiGet('/api/wifi/status');
+  let statusEl=document.getElementById('wifi-status');
+  if(st.connected) statusEl.innerHTML='<span style="color:#2ecc71">Connected: '+st.ssid+' ('+st.ip+')</span>';
+  else statusEl.innerHTML='<span style="color:#e74c3c">Disconnected</span>';
+  let h='<tr><td>SSID</td><td>Signal</td><td></td></tr>';
   if(d.networks) d.networks.forEach(n=>{
-    h+='<tr><td>'+n.ssid+'</td><td>'+n.rssi+' dBm</td><td><button class="sm" onclick="document.getElementById(\'ssid\').value=\''+n.ssid+'\'">选择</button></td></tr>';
+    let ej=JSON.stringify(n.ssid);
+    let dn=n.ssid.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    let lockIcon=n.authmode>0?'🔒':'';
+    h+='<tr><td>'+lockIcon+' '+dn+'</td><td>'+n.rssi+' dBm</td><td><button class="sm green" onclick=\'selectWifi('+ej+')\'>Connect</button></td></tr>';
   });
   document.getElementById('scan-results').innerHTML=h;
 }
-
-async function connectWiFi() {
-  let ssid=document.getElementById('ssid').value, pass=document.getElementById('password').value;
-  if(!ssid){ document.getElementById('wifi-status').innerHTML='<span class="error">请输入 SSID</span>'; return; }
-  document.getElementById('wifi-status').textContent='正在连接...';
-  let d=await apiPost('/api/wifi/connect',{ssid,password:pass});
+function selectWifi(ssid) {
+  _modalSsid=ssid;
+  document.getElementById('modal-ssid-label').textContent='Connect to: '+ssid;
+  document.getElementById('modal-password').value='';
+  document.getElementById('wifi-modal').classList.add('show');
+}
+function closeWifiModal() {
+  document.getElementById('wifi-modal').classList.remove('show');
+  _modalSsid='';
+}
+async function connectFromModal() {
+  let pass=document.getElementById('modal-password').value;
+  closeWifiModal();
+  document.getElementById('wifi-status').textContent='Connecting to '+_modalSsid+'...';
+  let d=await apiPost('/api/wifi/connect',{ssid:_modalSsid,password:pass});
   if(d.error) document.getElementById('wifi-status').innerHTML='<span class="error">'+d.error+'</span>';
-  else document.getElementById('wifi-status').textContent='已连接 '+d.ssid+' IP:'+d.ip;
+  else document.getElementById('wifi-status').innerHTML='<span style="color:#2ecc71">Connected: '+d.ssid+' ('+d.ip+')</span>';
+  scanWiFi();
 }
 
-async function setVolume() {
-  let v=parseInt(document.getElementById('volume').value);
-  let d=await apiPost('/api/audio/volume',{volume:v});
-  document.getElementById('vol-status').textContent=d.error?'错误':'音量: '+d.volume;
+/* ── Volume (real-time slider with NVS debounce) ── */
+var _volDebounceTimer=null;
+function onVolumeSlide(v) {
+  document.getElementById('volume-val').textContent=v;
+  apiPost('/api/audio/volume?save=false',{volume:parseInt(v)});
+  if(_volDebounceTimer) clearTimeout(_volDebounceTimer);
+  _volDebounceTimer=setTimeout(function(){
+    apiPost('/api/audio/volume',{volume:parseInt(v)});
+    document.getElementById('vol-status').textContent='Volume saved: '+v;
+    setTimeout(function(){document.getElementById('vol-status').textContent=''},2000);
+  },1000);
 }
 
 /* ── Audio Recording ── */
-async function recStart() {
-  let d=await apiGet('/api/audio/record_start');
-  if(!d.ok){ document.getElementById('rec-status').innerHTML='<span class="error">'+ (d.error||'失败') +'</span>'; return; }
-  document.getElementById('btn-rec-start').disabled=true;
-  document.getElementById('btn-rec-stop').disabled=false;
-  document.getElementById('rec-indicator').innerHTML='<span class="rec-dot on"></span>录音中...';
-  document.getElementById('rec-status').textContent='';
-  pollRecStatus();
-}
-async function recStop() {
-  let d=await apiGet('/api/audio/record_stop');
-  document.getElementById('btn-rec-start').disabled=false;
-  document.getElementById('btn-rec-stop').disabled=true;
-  document.getElementById('rec-indicator').innerHTML='<span class="rec-dot off"></span>空闲';
-  document.getElementById('rec-status').textContent=d.file?('已保存: '+d.file+' ('+Math.round(d.bytes/1024)+' KB)'):'';
+var s_recording=false;
+async function recToggle() {
+  if(s_recording) {
+    let d=await apiGet('/api/audio/record_stop');
+    s_recording=false;
+    document.getElementById('btn-rec').textContent='▶';
+    document.getElementById('btn-rec').className='green';
+    let info=d.file?('Stopped, file: '+d.file+' ('+Math.round(d.bytes/1024)+' KB)'):'Stopped';
+    document.getElementById('rec-status').textContent=info;
+    document.getElementById('rec-status').style.color='#3498db';
+    if(_recPollTimer){clearInterval(_recPollTimer);_recPollTimer=null}
+  } else {
+    let d=await apiGet('/api/audio/record_start');
+    if(!d.ok){ document.getElementById('rec-status').innerHTML='<span class="error">'+(d.error||'Failed')+'</span>'; return; }
+    s_recording=true;
+    document.getElementById('btn-rec').textContent='■';
+    document.getElementById('btn-rec').className='red';
+    document.getElementById('rec-status').textContent='Recording';
+    document.getElementById('rec-status').style.color='#e74c3c';
+    _recPollTimer=setInterval(pollRecStatus,1000);
+  }
 }
 async function pollRecStatus() {
+  if(!s_recording) return;
   let d=await apiGet('/api/audio/record_status');
-  if(d.recording){ document.getElementById('rec-status').textContent='已录 '+d.seconds+' 秒, '+Math.round(d.bytes/1024)+' KB'; setTimeout(pollRecStatus,1000); }
+  if(d.recording){
+    let info='Recording: '+d.seconds+'s';
+    if(d.file) info+=', file: '+d.file+' ('+Math.round(d.bytes/1024)+' KB)';
+    document.getElementById('rec-status').textContent=info;
+  }
 }
 
-/* ── Music Playback ── */
+/* ── Music Playback (single Start/Stop toggle, auto-refresh list) ── */
 async function loadMusicList() {
   let d=await apiGet('/api/audio/list');
   let h='';
-  if(d.files && d.files.length>0) d.files.forEach(f=>{
-    h+='<div class="file-row" style="padding:4px 8px;display:flex;justify-content:space-between"><span>'+f+'</span><button class="sm green" onclick="playMusic(\''+f+'\')">播放</button></div>';
-  });
-  else h='<div style="color:#666;padding:8px">无 MP3 文件</div>';
+  if(d.files && d.files.length>0) {
+    d.files.sort(function(a,b){return a.localeCompare(b)});
+    d.files.forEach(function(f,i){
+      let ej=JSON.stringify(f);
+      let dn=f.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      let isCurrentPlaying=(s_currentPlaying===f);
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-bottom:1px solid #0f3460">';
+      h+='<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+dn+'</span>';
+      h+='<button class="sm '+(isCurrentPlaying?'red':'green')+'" id="btn_play_'+i+'" onclick=\'playToggle('+ej+','+i+')\'>'+(isCurrentPlaying?'■':'▶')+'</button>';
+      h+='</div>';
+    });
+  } else h='<div style="color:#666;padding:8px">No MP3 files</div>';
   document.getElementById('music-list').innerHTML=h;
 }
-async function playMusic(fn) {
-  document.getElementById('play-status').textContent='正在加载...';
-  document.getElementById('btn-stop-play').disabled=false;
-  let d=await apiGet('/api/audio/play?file='+encodeURIComponent(fn));
-  document.getElementById('play-status').textContent=d.ok?'正在播放: '+fn:'播放失败';
-}
-async function stopPlay() {
-  await apiGet('/api/audio/stop');
-  document.getElementById('play-status').textContent='已停止';
-  document.getElementById('btn-stop-play').disabled=true;
+var s_currentPlaying='', s_currentIdx=-1;
+async function playToggle(fn,idx) {
+  if(s_currentPlaying===fn) {
+    await apiGet('/api/audio/stop');
+    s_currentPlaying=''; s_currentIdx=-1;
+    document.getElementById('play-status').textContent='Stopped';
+    document.getElementById('play-status').style.color='#3498db';
+    var btn=document.getElementById('btn_play_'+idx);
+    if(btn){btn.textContent='▶';btn.className='sm green'}
+  } else {
+    if(s_currentPlaying) {
+      await apiGet('/api/audio/stop');
+      var oldBtn=document.getElementById('btn_play_'+s_currentIdx);
+      if(oldBtn){oldBtn.textContent='▶';oldBtn.className='sm green'}
+    }
+    document.getElementById('play-status').textContent='Loading...';
+    document.getElementById('play-status').style.color='#aaa';
+    let d=await apiGet('/api/audio/play?file='+encodeURIComponent(fn));
+    if(d.ok) {
+      s_currentPlaying=fn; s_currentIdx=idx;
+      document.getElementById('play-status').textContent='Playing: '+fn;
+      document.getElementById('play-status').style.color='#2ecc71';
+      var btn=document.getElementById('btn_play_'+idx);
+      if(btn){btn.textContent='■';btn.className='sm red'}
+    } else {
+      document.getElementById('play-status').textContent='Play failed';
+      document.getElementById('play-status').style.color='#e74c3c';
+    }
+  }
 }
 
 /* ── File Manager ── */
-async function loadFileList(dir) {
-  fmCurrent=dir; fmSelected=[];
-  document.getElementById('fm-current').textContent=dir;
-  document.getElementById('btn-fm-del-sel').disabled=true;
-  let d=await apiGet('/api/files/list?dir='+encodeURIComponent(dir));
-  if(!d.ok){ document.getElementById('fm-status').innerHTML='<span class="error">'+ (d.error||'加载失败') +'</span>'; return; }
-  document.getElementById('fm-capacity').textContent='已用: '+(d.total_kb?(Math.round((d.total_kb-d.free_kb)/1024*10)/10)+' MB / '+(Math.round(d.total_kb/1024*10)/10)+' MB':'?');
-  let h='';
-  if(dir!=='/') h+='<div class="file-row" style="padding:4px 8px;color:#e94560" onclick="loadFileList(\''+getParentDir()+'\')">📁 ..</div>';
-  if(d.files) d.files.forEach(f=>{
-    let icon=f.is_dir?'📁':'📄';
-    let sz=f.is_dir?'':formatSize(f.size);
-    if(f.is_dir) {
-      h+='<div class="file-row" style="padding:4px 8px;display:flex;justify-content:space-between" onclick="event.stopPropagation();loadFileList((fmCurrent===\'/\'?\'\':fmCurrent)+\'/\'+f.name)">';
-    } else {
-      h+='<div class="file-row" style="padding:4px 8px;display:flex;justify-content:space-between" onclick="toggleFile(\''+f.name+'\',event)">';
-    }
-    h+='<span>'+icon+' '+f.name+'</span><span style="color:#666;font-size:11px">'+sz+'</span></div>';
-  });
-  document.getElementById('fm-list').innerHTML=h||'<div style="color:#666;padding:8px">目录为空</div>';
-  document.getElementById('fm-status').textContent='';
+var fmCurrentDir='/';
+async function loadFileManager(d) {
+  if(typeof d!=='undefined') fmCurrentDir=d;
+  try{var r=await fetch('/api/files/list?dir='+encodeURIComponent(fmCurrentDir));
+  var j=await r.json();
+  if(!j.ok){document.getElementById('fm_breadcrumb').textContent='Error';return}
+  document.getElementById('fm_breadcrumb').textContent=j.current||'/';
+  var cap='';
+  if(j.total_kb&&j.total_kb>0){var free=j.free_kb, total=j.total_kb, used=total-free;
+  var u=used>1048576?(used/1048576).toFixed(1)+'GB':used>1024?(used/1024).toFixed(1)+'MB':used+'KB';
+  var t=total>1048576?(total/1048576).toFixed(1)+'GB':total>1024?(total/1024).toFixed(1)+'MB':total+'KB';
+  cap=u+' used / '+t}
+  else if(j.total_kb!==undefined)cap='Capacity unknown';
+  document.getElementById('fm_capacity').textContent=cap;
+  var h='';
+  if(fmCurrentDir!=='/') h+='<div style="display:flex;align-items:center;padding:3px 0;border-bottom:1px solid #0f3460;cursor:pointer;color:#00d4ff" onclick="navigateUp()">📁 ..</div>';
+  if(j.files) j.files.sort(function(a,b){if(a.is_dir!=b.is_dir)return a.is_dir?-1:1;return a.name.localeCompare(b.name)});
+  if(j.files&&j.files.length)
+  for(var i=0;i<j.files.length;i++){
+  var f=j.files[i];var icon=f.is_dir?'📁':'📄';
+  var sz=f.size>1048576?(f.size/1048576).toFixed(1)+'MB':f.size>1024?Math.round(f.size/1024)+'KB':f.size+'B';
+  var ej=JSON.stringify(f.name);var dn=f.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  if(f.is_dir) {
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #0f3460">';
+    h+='<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onclick=\'navigateTo('+ej+')\'>'+icon+' '+dn+'</span>';
+    h+='<span style="display:flex;gap:4px;margin-left:8px">';
+    h+='<button class="sm" onclick=\'navigateTo('+ej+')\'>Open</button>';
+    h+='<button class="sm red" onclick=\'deleteFile('+ej+')\'>🗑</button>';
+    h+='</span></div>';
+  } else {
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #0f3460">';
+    h+='<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+icon+' '+dn+' <span style="color:#666;font-size:10px">'+sz+'</span></span>';
+    h+='<span style="display:flex;gap:4px;margin-left:8px">';
+    h+='<button class="sm" onclick=\'downloadFile('+ej+')\'>⬇</button>';
+    h+='<button class="sm red" onclick=\'deleteFile('+ej+')\'>🗑</button>';
+    h+='</span></div>';
+  }
+  }
+  document.getElementById('fm_list').innerHTML=h}
+  catch(e){document.getElementById('fm_breadcrumb').textContent='Load failed'}}
+
+function navigateTo(name) {
+  var p=fmCurrentDir;if(p[p.length-1]!=='/')p+='/';
+  loadFileManager(p+name)}
+function navigateUp() {
+  if(fmCurrentDir=='/'||fmCurrentDir=='')return;
+  var p=fmCurrentDir;if(p[p.length-1]=='/')p=p.slice(0,-1);
+  var i=p.lastIndexOf('/');
+  loadFileManager(i<0?'/':p.substring(0,i)||'/')}
+function downloadFile(name) {
+  var p=fmCurrentDir;if(p[p.length-1]!=='/')p+='/';
+  document.getElementById('fm_status').textContent='Downloading: '+name+'...';
+  var a=document.createElement('a');a.href='/api/files/download?path='+encodeURIComponent(p+name);a.download=name;a.click();
+  setTimeout(function(){document.getElementById('fm_status').textContent='Downloaded: '+name},2000);
 }
-function getParentDir() {
-  let p=fmCurrent.split('/').filter(Boolean); p.pop();
-  return '/'+p.join('/')||'/';
-}
-function toggleFile(name, evt) {
-  evt.stopPropagation();
-  let idx=fmSelected.indexOf(name);
-  if(idx>=0) fmSelected.splice(idx,1); else fmSelected.push(name);
-  document.getElementById('btn-fm-del-sel').disabled=fmSelected.length===0;
-  document.querySelectorAll('#fm-list .file-row').forEach((el,i)=>{
-    let nm=el.querySelector('span').textContent.trim();
-    if(nm.startsWith('📁')) nm=nm.substring(2).trim();
-    else if(nm.startsWith('📄')) nm=nm.substring(2).trim();
-    if(nm==='..') return;
-    el.classList.toggle('selected', fmSelected.indexOf(nm)>=0);
-  });
-}
-async function deleteSelected() {
-  if(fmSelected.length===0) return;
-  let paths=fmSelected.map(f=>fmCurrent==='/'?'/'+f:fmCurrent+'/'+f);
-  let d=await apiPost('/api/files/delete_batch',{paths:paths});
-  document.getElementById('fm-status').textContent='已删除: '+d.deleted+', 失败: '+d.failed;
-  loadFileList(fmCurrent);
-}
-function downloadSelected() {
-  fmSelected.forEach(f=>{
-    let p=fmCurrent==='/'?'/'+f:fmCurrent+'/'+f;
-    window.open('/api/files/download?path='+encodeURIComponent(p), '_blank');
-  });
-}
-function formatSize(b) {
-  if(b<1024) return b+' B';
-  if(b<1048576) return (b/1024).toFixed(1)+' KB';
-  return (b/1048576).toFixed(1)+' MB';
-}
+async function deleteFile(name) {
+  var p=fmCurrentDir;if(p[p.length-1]!=='/')p+='/';
+  if(!confirm('Delete '+name+'?'))return;
+  document.getElementById('fm_status').textContent='Deleting: '+name+'...';
+  try{var r=await fetch('/api/files/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p+name})});
+  var j=await r.json();
+  if(j.ok){document.getElementById('fm_status').textContent='Deleted: '+name;loadFileManager()}
+  else document.getElementById('fm_status').innerHTML='<span class="error">Error: '+j.error+'</span>'}
+  catch(e){document.getElementById('fm_status').innerHTML='<span class="error">Error</span>'}}
 
 /* ── ULog ── */
+var s_ulogRunning=false;
+async function ulogToggle() {
+  if(s_ulogRunning) {
+    let d=await apiPost('/api/ulog/stop',{});
+    if(d.ok){ s_ulogRunning=false; refreshUlogStatus(); }
+  } else {
+    let d=await apiPost('/api/ulog/start',{});
+    if(d.ok){ s_ulogRunning=true; refreshUlogStatus(); }
+  }
+}
 async function refreshUlogStatus() {
   let d=await apiGet('/api/ulog/status');
-  let running=d.running;
-  document.getElementById('ulog-indicator').innerHTML='<span class="rec-dot '+(running?'on':'off')+'"></span>'+(running?'运行中':'已停止');
-  document.getElementById('btn-ulog-start').disabled=running;
-  document.getElementById('btn-ulog-stop').disabled=!running;
-  document.getElementById('ulog-status').textContent=d.filepath?('文件: '+d.filepath+' ('+Math.round(d.bytes_written/1024)+' KB)'):'';
-}
-async function ulogStart() {
-  let d=await apiPost('/api/ulog/start',{});
-  if(d.ok) refreshUlogStatus();
-}
-async function ulogStop() {
-  let d=await apiPost('/api/ulog/stop',{});
-  if(d.ok) refreshUlogStatus();
+  s_ulogRunning=d.running;
+  document.getElementById('btn-ulog').textContent=s_ulogRunning?'■':'▶';
+  document.getElementById('btn-ulog').className='sm '+(s_ulogRunning?'red':'green');
+  let info=s_ulogRunning?'Recording':'Stopped';
+  if(d.filepath && d.filepath.length>0) {
+    let kb=Math.round(d.bytes_written/1024);
+    info+=', file: '+d.filepath+' ('+kb+' KB)';
+  }
+  document.getElementById('ulog-status').textContent=info;
+  document.getElementById('ulog-status').style.color=s_ulogRunning?'#e74c3c':'#3498db';
 }
 
-/* ── System Info ── */
+/* ── System Info (auto-refresh) ── */
 async function refreshSysInfo() {
   let d=await apiGet('/api/system/info');
   let h='';
   if(d.error) h='<tr><td colspan="2" class="error">'+d.error+'</td></tr>';
   else {
-    h+='<tr><td>芯片</td><td>'+(d.chip||'N/A')+'</td></tr>';
+    h+='<tr><td>Chip</td><td>'+(d.chip||'N/A')+'</td></tr>';
     h+='<tr><td>CPU</td><td>'+(d.cpu_freq||'N/A')+' MHz</td></tr>';
     h+='<tr><td>Flash</td><td>'+(d.flash_size||'N/A')+' MB</td></tr>';
     h+='<tr><td>PSRAM</td><td>'+(d.psram_size||'N/A')+' MB</td></tr>';
     h+='<tr><td>SDK</td><td>'+(d.sdk_version||'N/A')+'</td></tr>';
-    h+='<tr><td>WiFi</td><td>'+(d.wifi_connected?'已连接 '+d.wifi_ssid:'未连接')+'</td></tr>';
-    h+='<tr><td>SD 卡</td><td>'+(d.sdcard_mounted?'已挂载':'未检测到')+'</td></tr>';
-    h+='<tr><td>空闲堆内存</td><td>'+(d.free_heap||'N/A')+' KB</td></tr>';
-    h+='<tr><td>运行时间</td><td>'+(d.uptime||'N/A')+' 秒</td></tr>';
-    h+='<tr><td>NTP</td><td>'+(d.sntp_synced?'✅ 已同步':'⏳ 未同步')+'</td></tr>';
-    h+='<tr><td>时区</td><td>'+(d.timezone||'N/A')+'</td></tr>';
-    if(d.current_time) h+='<tr><td>当前时间</td><td>'+d.current_time+'</td></tr>';
+    h+='<tr><td>WiFi</td><td>'+(d.wifi_connected?'Connected '+d.wifi_ssid:'Disconnected')+'</td></tr>';
+    h+='<tr><td>SD Card</td><td>'+(d.sdcard_mounted?'Mounted':'Not detected')+'</td></tr>';
+    h+='<tr><td>Free Heap</td><td>'+(d.free_heap||'N/A')+' KB</td></tr>';
+    h+='<tr><td>Uptime</td><td>'+(d.uptime||'N/A')+' s</td></tr>';
+    h+='<tr><td>NTP</td><td>'+(d.sntp_synced?'Synced':'Not synced')+'</td></tr>';
+    h+='<tr><td>Timezone</td><td>'+(d.timezone||'N/A')+'</td></tr>';
+    if(d.current_time) h+='<tr><td>Time</td><td>'+d.current_time+'</td></tr>';
   }
   document.getElementById('sys-info').innerHTML=h;
 }
 
-refreshSysInfo();
+/* ── Init ── */
+(async function(){
+  let d=await apiGet('/api/audio/volume');
+  if(!d.error && d.volume!==undefined){
+    document.getElementById('volume').value=d.volume;
+    document.getElementById('volume-val').textContent=d.volume;
+  }
+  scanWiFi();
+  _scanTimer=setInterval(scanWiFi,10000);
+})();
 </script>
 </body>
 </html>
@@ -971,7 +1054,7 @@ static esp_err_t _api_system_stats(httpd_req_t *req) {
     return ESP_OK;
 }
 
-/* POST /api/audio/volume */
+/* POST /api/audio/volume — ?save=false skips NVS write for real-time slider */
 static esp_err_t _api_audio_volume_set(httpd_req_t *req) {
     char buf[128];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -980,6 +1063,16 @@ static esp_err_t _api_audio_volume_set(httpd_req_t *req) {
         return ESP_FAIL;
     }
     buf[ret] = '\0';
+
+    /* Check ?save=false query param */
+    bool save_nvs = true;
+    char q[32] = {};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && strlen(q) > 0) {
+        char val[8] = {};
+        if (httpd_query_key_value(q, "save", val, sizeof(val)) == ESP_OK) {
+            if (strcmp(val, "false") == 0) save_nvs = false;
+        }
+    }
 
     cJSON *root = cJSON_Parse(buf);
     cJSON *vol_item = cJSON_GetObjectItem(root, "volume");
@@ -994,12 +1087,14 @@ static esp_err_t _api_audio_volume_set(httpd_req_t *req) {
 
         AudioDriver::instance().set_volume(vol);
 
-        /* Save to NVS */
-        nvs_handle_t h;
-        if (nvs_open(NVS_NAMESPACE_SETTINGS, NVS_READWRITE, &h) == ESP_OK) {
-            nvs_set_i32(h, NVS_KEY_VOLUME, vol);
-            nvs_commit(h);
-            nvs_close(h);
+        /* Save to NVS only when save_nvs is true (debounced call) */
+        if (save_nvs) {
+            nvs_handle_t h;
+            if (nvs_open(NVS_NAMESPACE_SETTINGS, NVS_READWRITE, &h) == ESP_OK) {
+                nvs_set_i32(h, NVS_KEY_VOLUME, vol);
+                nvs_commit(h);
+                nvs_close(h);
+            }
         }
 
         cJSON_AddNumberToObject(resp, "volume", vol);
@@ -1135,14 +1230,15 @@ static esp_err_t _api_rec_stop(httpd_req_t *req) {
 
 /* GET /api/audio/record_status */
 static esp_err_t _api_rec_status(httpd_req_t *req) {
-    char r[128];
+    char r[256];
     if (s_is_recording) {
         audio_lock();
         uint32_t bytes = s_rec_bytes.load(std::memory_order_relaxed);
         uint32_t start_ms = s_rec_start_ms.load(std::memory_order_relaxed);
+        char path_snap[128]; strlcpy(path_snap, s_rec_path, sizeof(path_snap));
         audio_unlock();
         uint32_t e = (uint32_t)((esp_timer_get_time() / 1000 - start_ms) / 1000);
-        snprintf(r, sizeof(r), "{\"recording\":1,\"seconds\":%lu,\"bytes\":%lu}", (unsigned long)e, (unsigned long)bytes);
+        snprintf(r, sizeof(r), "{\"recording\":1,\"seconds\":%lu,\"bytes\":%lu,\"file\":\"%s\"}", (unsigned long)e, (unsigned long)bytes, path_snap);
     } else snprintf(r, sizeof(r), "{\"recording\":0}");
     httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
