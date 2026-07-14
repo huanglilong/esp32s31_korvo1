@@ -5,14 +5,26 @@
   - 芯片版本: ESP32-S31NRV16 / ESP32-S31NRV32, CPU 主频 320 MHz
   - 详细硬件信息: [doc/esp32s31_korvo1_hardware_info.md](doc/esp32s31_korvo1_hardware_info.md)
 
+### Official BSP Component
+
+- [espressif/esp32_s31_korvo_1](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1) (Board Support Package) — v1.0.0~1
+  - 源码: [esp-bsp/bsp/esp32_s31_korvo_1](https://github.com/espressif/esp-bsp/tree/master/bsp/esp32_s31_korvo_1)
+  - **Capabilities**: Display (LVGL) | Touch (GT1151) | Buttons (ADC array) | Audio (ES8389) | SDCARD | LED (WS2812) | Camera (OV3660)
+  - **Key Dependencies**: `espressif/esp_codec_dev ~1.5`, `espressif/esp_lvgl_port ^2`, `espressif/esp_lcd_touch_gt1151`, `espressif/button ^4`, `espressif/led_indicator ^2`, `espressif/esp_video ~2.2`
+  - **Official Examples**: Display, Display+Audio+Photo, Camera Video, LVGL Benchmark/Demos, SD Card, USB HID (7 examples)
+  - > ⚠️ **WARNING**: MCLK 引脚在 ESP32-S31 上未连接。推荐音频采样率为 **16kHz**！
+
 ### External Peripherals (Korvo-1)
 
 - **Audio**: ES8389 立体声编解码器 (I2S + I2C) + NS4150B ×2 (3W D 类功放), 双模拟麦克风 + 双扬声器输出 (4Ω / 3W)
+  > ⚠️ **MCLK 未连接**: GPIO42 (I2S_MCLK) 在 ESP32-S31 上不可用。推荐采样率 **16kHz**，避免使用依赖 MCLK 的采样率配置。详见 [官
+
+方 BSP 说明](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1/readme)。
   |   Signal  |  ESP32-S31 GPIO |   Direction   |   ES8389  |
   |:----:|:----:|:----:|:----:|
   |   I2C_SDA	|   GPIO0	|   ↔	|   I2C data (AD0=L, 7-bit addr 0x10)  |
   |   I2C_SCL	|   GPIO1	|   ↔	|   I2C clk   |
-  |   I2S_MCLK	|   GPIO42	|   →	|   MCLK      |
+  |   I2S_MCLK	|   GPIO42	|   →	|   MCLK (⚠️ 未连接)  |
   |   I2S_SCLK	|   GPIO3	|   ↔	|   BCLK      |
   |   I2S_LRCK	|   GPIO4	|   ↔	|   LRCK/WS   |
   |   I2S_SDOUT	|   GPIO6	|   ←	|   ADC data  |
@@ -107,7 +119,8 @@
 ### Software Features
 
 - **Audio Pipeline**: 双模拟麦克风 → ES8389 ADC → I2S → ESP32-S31 处理 → I2S → ES8389 DAC → NS4150B PA → 扬声器
-- **Audio Driver**: ES8389 立体声编解码器驱动, 使用 `esp_codec_dev` API, I2S 48kHz 16-bit 双工, 硬件音量控制, uORB 音量状态发布
+  - > ⚠️ MCLK 不可用，推荐采样率 **16kHz**
+- **Audio Driver**: ES8389 立体声编解码器驱动, 使用 `esp_codec_dev` API, I2S 16kHz 16-bit 双工 (MCLK-less), 硬件音量控制, uORB 音量状态发布
 - **SD Card**: SDIO 3.0 4-bit 模式, FATFS 文件系统, boot 时自动挂载
 - **Camera**: DVP OV3660 摄像头驱动 (optional, mutex 互斥控制)
 - **WiFi**: 内置 Wi-Fi 6 STA + SoftAP 模式, NVS 凭证持久化, SNTP 时间同步

@@ -18,7 +18,7 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| A1 | **Audio 驱动基础** | ES8389 编解码器初始化 (I2S + I2C), 双 Mic + 双 Speaker 通路建立 | ✅ 已完成 |
+| A1 | **Audio 驱动基础** | ES8389 编解码器初始化 (I2S + I2C), 双 Mic + 双 Speaker 通路建立。⚠️ MCLK 不可用，采样率 16kHz | ✅ 已完成 |
 | A2 | **Audio 录音** | 双 Mic → ES8389 ADC → I2S RX → MP3/WAV 编码 → SD 卡存储 | ⏳ 待开发 |
 | A3 | **Audio 播放** | SD 卡 → MP3/WAV 解码 → I2S TX → ES8389 DAC → NS4150B PA → 扬声器 | ⏳ 待开发 |
 | A4 | **Audio 音量控制** | ES8389 硬件音量调节, 按键 (VOL+/VOL-) 和 API 控制, NVS 持久化 | ⏳ 待开发 |
@@ -93,7 +93,7 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| S1 | **ES8389 驱动稳定性** | I2S + I2C 通信可靠, 采样率切换无缝, 无爆音 | ⏳ 待开发 |
+| S1 | **ES8389 驱动稳定性** | I2S + I2C 通信可靠, 采样率切换无缝, 无爆音。MCLK-less 模式 (BCLK 作为主时钟) | ⏳ 待开发 |
 | S2 | **双核任务分配** | HP 核处理音频/识别, LP 核处理后台任务, 避免音频卡顿 | ⏳ 待开发 |
 | S3 | **音频低延迟** | Mic→Speaker 环回延迟 <20ms, 语音唤醒延迟 <500ms | ⏳ 待开发 |
 | S4 | **SD 卡可靠性** | 读写错误重试, 热插拔检测, FAT 文件系统一致性 | ⏳ 待开发 |
@@ -116,4 +116,4 @@
 | 2026-07-14 | v0.5.1 | ULog 延迟启动: ULog 不再在 boot 时立即 start, 改为 SNTP 时间同步完成后由 web_config_task 自动 start (参考 esp32p4_monitor 实现)。确保 ULog 文件获得正确的 wall-clock 时间戳和日期命名。main.cpp 只做 init + add_topic, 不调用 ulog_writer_start()。 |
 | 2026-07-14 | v0.6 | **Driver refactoring: esp_board_manager API pattern**. AudioDriver now uses `esp_codec_dev` (ES8389 via `es8389_codec_new`, `esp_codec_dev_new`, etc.) instead of raw I2S+I2C+register access. SDCardDriver and CameraDriver refactored to config-driven `init(cfg, cfg_size, handle)` API matching esp_board_manager device pattern (`dev_fs_fat_config_t`, `dev_camera_config_t` with DVP sub-type). Added `espressif/esp_codec_dev` component dependency. Build passes (IDF v6.1-beta1). |
 | 2026-07-14 | v0.6.1 | **Fix GPIO 41 invalid**: GPIO 41 excluded on ESP32-S31 (BIT41 in SOC_GPIO_VALID_GPIO_MASK). Changed I2C SDA from GPIO 41→39. Removed duplicate macros in app_config.h. Added thread-safety protocol to AudioDriver (_codec_mutex + _codec_ops_in_flight, from P4-Monitor pattern). |
-| 2026-07-14 | v0.6.2 | **Fix all pin mappings from V1.1 schematic**: I2C GPIO0/1, I2S correct, SD GPIO20-25, PA_CTRL GPIO43, WS2812 GPIO37, camera DVP GPIO46-57, buttons ADC GPIO42 (resistor ladder). Fix ES8389 I2C addr 0x20 for esp_codec_dev. |
+| 2026-07-14 | v0.6.3 | **更新官方 BSP 参考**: 添加 [espressif/esp32_s31_korvo_1](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1) v1.0.0~1 官方板级支持包信息到所有项目文档。重要发现: **MCLK 引脚 (GPIO42) 在 ESP32-S31 上未连接**，推荐音频采样率 16kHz。更新 README/PROJECT/硬件文档以反映此硬件限制和 BSP 依赖关系。 |

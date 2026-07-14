@@ -74,6 +74,8 @@
 
 ### 2.2 音频子系统详解
 
+> ⚠️ **MCLK 未连接**: GPIO42 (I2S_MCLK) 在 ESP32-S31 上未连接至 ES8389。推荐采样率 **16kHz**，使用 BCLK 作为 ES8389 时钟源。
+
 | 组件 | 型号/规格 | 说明 |
 |------|-----------|------|
 | 音频编解码器 | **ES8389** | 低功耗立体声编解码器，双 ADC/DAC，低噪声前置放大器，耳机驱动，数字音效，模拟混音，增益控制 |
@@ -83,6 +85,7 @@
 | 扬声器输出 | 4Ω / 3W 双声道 | 引脚间距 2.00 mm |
 | 接口类型 | I2S + I2C | 音频数据走 I2S，控制走 I2C |
 | 独立供电 | 5V→3.3V LDO | 音频电路使用独立电源轨，减少数字噪声干扰 |
+| 时钟 | BCLK (MCLK-less) | MCLK 未连接，使用 BCLK 作为主时钟 |
 
 ### 2.3 按键功能
 
@@ -154,11 +157,13 @@
 
 ### 3.2 通信接口连接 (含 GPIO 映射, 来源: V1.1 原理图)
 
+> ⚠️ **MCLK 未连接**: GPIO42 (I2S_MCLK) 在 ESP32-S31 上未连接至 ES8389。推荐音频采样率 **16kHz**，使用 BCLK 作为 ES8389 时钟源。参见 [官方 BSP README](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1/readme)。
+
 | 外设 | 连接总线 | ESP32-S31 GPIO | 说明 |
 |------|----------|---------------|------|
 | ES8389 I2C SDA | I2C | **GPIO0** (strapping pin) | 编解码器控制数据 |
 | ES8389 I2C SCL | I2C | **GPIO1** (strapping pin) | 编解码器控制时钟 |
-| ES8389 I2S MCLK | I2S | **GPIO42** | 主时钟输出 |
+| ES8389 I2S MCLK | I2S | **GPIO42** | 主时钟输出 (⚠️ 未连接) |
 | ES8389 I2S BCLK | I2S | **GPIO3** | 位时钟 |
 | ES8389 I2S LRCK | I2S | **GPIO4** | 左右声道时钟 |
 | ES8389 I2S DSDIN | I2S | **GPIO5** | DAC 数据输入 |
@@ -230,6 +235,7 @@
 | 框架 | 说明 |
 |------|------|
 | **ESP-IDF** | Espressif 官方 IoT 开发框架 |
+| **[esp32_s31_korvo_1 BSP](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1)** | **官方板级支持包 v1.0.0~1** — 提供 Display/LVGL/Touch/Buttons/Audio/SDCARD/LED/Camera 驱动 |
 | **ESP-BLE-MESH / ESP-BLE-AUDIO** | 蓝牙 LE 生态解决方案 |
 | **ESP-Brookesia** | AIoT 设备人机交互框架（图形 UI） |
 | **ESP-GMF** | 通用多媒体框架（音视频处理） |

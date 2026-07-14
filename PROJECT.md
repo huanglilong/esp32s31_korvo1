@@ -93,11 +93,13 @@ esp32s31_korvo1/
 
 ### Audio (ES8389)
 
+> ⚠️ **MCLK 未连接**: GPIO42 (I2S_MCLK) 在 ESP32-S31 上不可用。推荐采样率 **16kHz**。使用 BCLK 作为 ES8389 的主时钟源。
+
 | Signal | Direction | ESP32-S31 GPIO | Description |
 |:---|:---|:---|:---|
 | I2C_SDA | ↔ | GPIO0 (strapping) | 配置数据 |
 | I2C_SCL | ↔ | GPIO1 (strapping) | 配置时钟 |
-| I2S_MCLK | ESP32-S31 → ES8389 | GPIO42 | 主时钟 |
+| I2S_MCLK | ESP32-S31 → ES8389 | GPIO42 | 主时钟 (⚠️ 未连接) |
 | I2S_SCLK | ↔ | GPIO3 | 位时钟 (BCLK) |
 | I2S_LRCK | ↔ | GPIO4 | 左右声道时钟 (WS) |
 | I2S_SDOUT | ← ES8389 | GPIO6 | ADC 数据 (麦克风) |
@@ -145,6 +147,7 @@ esp32s31_korvo1/
 | 框架 | 用途 |
 |------|------|
 | **ESP-IDF v6.x** | 基础开发框架 |
+| **esp32_s31_korvo_1 BSP** (v1.0.0~1) | [官方板级支持包](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1), 提供 Display/LVGL/Touch/Buttons/Audio/SDCARD/LED/Camera 驱动 |
 | **ESP-Skainet** | AI 语音助手 SDK (语音唤醒 + 命令词识别) |
 | **ESP-Brookesia** | HMI 人机交互框架 (图形 UI, LVGL) |
 | **ESP-GMF** | 通用多媒体框架 (音视频管道) |
