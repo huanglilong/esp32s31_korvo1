@@ -103,7 +103,15 @@ After code changes, rebuild. If `sdkconfig.defaults` changed, `fullclean` first.
 
 ### 4.2 Debug Workflow (no TTY)
 
-When `idf.py monitor` is unavailable, use the step-by-step build → flash → serial capture → log analysis workflow in [esp32_debug_workflow.md](.github/esp32_debug_workflow.md).
+When `idf.py monitor` is unavailable, use the automated debug script:
+
+```bash
+./tools/esp32_debug.sh              # Build → Flash → Capture → Analyze
+./tools/esp32_debug.sh capture      # Capture logs only
+./tools/esp32_debug.sh filter -k wifi,audio  # Filter saved logs
+```
+
+See [esp32_debug_workflow.md](.github/esp32_debug_workflow.md) for full documentation.
 
 ---
 
