@@ -1,6 +1,8 @@
 dependencies:
   espressif/mdns:
     version: ^1.0
+  espressif/esp_audio_simple_player:
+    version: ^1.0.0
   espressif/cjson:
     version: ^1.7
   espressif/esp_codec_dev:

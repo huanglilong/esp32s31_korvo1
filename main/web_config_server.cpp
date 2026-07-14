@@ -2,20 +2,23 @@
  * @file web_config_server.cpp
  * @brief Web configuration server for ESP32-S31-Korvo-1.
  *
- * HTTP server on port 8080 with REST APIs:
- *   - GET  /api/wifi/scan      — scan nearby WiFi networks
- *   - POST /api/wifi/connect   — connect to WiFi network
- *   - GET  /api/wifi/status    — get current WiFi status
- *   - GET  /api/system/info    — system information
- *   - GET  /api/system/stats   — system performance stats
- *   - POST /api/audio/volume   — set speaker volume
- *   - GET  /api/audio/volume   — get current volume
- *   - GET  /api/sdcard/info    — SD card status
+ * HTTP server on port 8080 with REST APIs and Web UI:
+ *   WiFi:  GET  /api/wifi/scan, POST /api/wifi/connect, GET /api/wifi/status
+ *   Audio: POST /api/audio/volume, GET /api/audio/volume
+ *          GET  /api/audio/record_start, /api/audio/record_stop, /api/audio/record_status
+ *          GET  /api/audio/list, /api/audio/play, /api/audio/stop
+ *   Files: GET  /api/files/list, GET /api/files/download,
+ *          POST /api/files/delete, POST /api/files/delete_batch
+ *   ULog:  GET  /api/ulog/status, POST /api/ulog/start, POST /api/ulog/stop
+ *   System:GET  /api/system/info, /api/system/stats, /api/system/timezone
+ *          POST /api/system/timezone
+ *   SDCard:GET  /api/sdcard/info
  *
- * Web UI:
- *   - GET  /                   — simple WiFi config webpage
+ * Web UI: GET / — dual-mode page (Audio + File Manager tabs) + WiFi/Settings
  *
  * mDNS: advertises _http._tcp on esp-web-XXXXXX.local:8080
+ *
+ * Reference: esp32p4_monitor/main/web_config_server.cpp
  */
 
 #include "web_config_server.hpp"
@@ -35,6 +38,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sys/stat.h"
+#include "dirent.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -48,9 +52,173 @@
 #include "drivers/system_monitor/system_monitor.hpp"
 #include "ulog_writer.h"
 
+/* Audio recording / playback */
+#include "layer3.h"  /* shine MP3 encoder */
+#include "esp_audio_simple_player.h"
+
 static const char *TAG = "web_config";
 
 static httpd_handle_t s_httpd = nullptr;
+
+/* ── Audio recording / playback state ──────────────────────────── */
+
+#define REC_BUF_SAMPLES      480
+#define REC_BUF_BYTES        (REC_BUF_SAMPLES * 2 * sizeof(int16_t))
+#define ENC_SAMPLES_PER_CH   1152
+#define PCM_BUF_SAMPLES      (ENC_SAMPLES_PER_CH * 2)
+
+static std::atomic<TaskHandle_t> s_audio_task{nullptr};
+static StackType_t   *s_audio_stack = NULL;
+static StaticTask_t  *s_audio_tcb = NULL;
+static std::atomic<bool>  s_audio_running{false};
+static std::atomic<bool>  s_is_recording{false};
+static shine_t        s_shine = NULL;
+static int16_t       *s_pcm_buf = NULL;
+static std::atomic<int>  s_pcm_count{0};
+static FILE          *s_rec_file = NULL;
+static std::atomic<uint32_t> s_rec_bytes{0};
+static std::atomic<uint32_t> s_rec_start_ms{0};
+static char           s_rec_path[128];
+
+/* Playback */
+static esp_asp_handle_t s_asp = NULL;
+static std::atomic<bool>    s_playing{false};
+
+/* Mutual exclusion — file manager blocks audio ops during download/delete */
+static std::atomic<bool>    s_fm_busy{false};
+
+/* Audio mutex — serializes audio operations across concurrent HTTP handlers */
+static SemaphoreHandle_t s_audio_mutex = NULL;
+
+static void audio_lock(void)
+{
+    if (s_audio_mutex) xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+}
+
+static void audio_unlock(void)
+{
+    if (s_audio_mutex) xSemaphoreGive(s_audio_mutex);
+}
+
+static void _stop_audio_task_if_running(void)
+{
+    if (!s_audio_task.load(std::memory_order_acquire) && !s_audio_running) return;
+    s_audio_running = false;
+    for (int i = 0; i < 10 && s_audio_task.load(std::memory_order_acquire); ++i) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (s_audio_task.load(std::memory_order_acquire)) {
+        ESP_LOGW(TAG, "Audio task did not exit in time, force deleting");
+        vTaskDelete(s_audio_task.exchange(nullptr, std::memory_order_acq_rel));
+    }
+    if (s_audio_stack) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; }
+}
+
+/* Audio recording task: codec ADC → shine MP3 → SD card */
+static void audio_task(void *arg)
+{
+    (void)arg;
+    int16_t *buf = (int16_t *)heap_caps_calloc(1, REC_BUF_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) { s_audio_running = false; s_audio_task.store(nullptr, std::memory_order_release); vTaskDelete(NULL); return; }
+    while (s_audio_running) {
+        /* Use AudioDriver::codec_read() which internally uses the BSP-managed I2S handle */
+        int n = AudioDriver::instance().codec_read((uint8_t*)buf, REC_BUF_BYTES);
+        if (n <= 0) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+        int32_t spc = n / (2 * sizeof(int16_t));
+        if (s_is_recording && s_pcm_buf && s_shine) {
+            for (int32_t i = 0; i < spc; i++) {
+                int idx = s_pcm_count.load(std::memory_order_relaxed);
+                s_pcm_buf[idx * 2]     = buf[i * 2];
+                s_pcm_buf[idx * 2 + 1] = buf[i * 2 + 1];
+                if (s_pcm_count.fetch_add(1, std::memory_order_relaxed) + 1 >= ENC_SAMPLES_PER_CH) {
+                    int wr = 0;
+                    unsigned char *mp3 = shine_encode_buffer_interleaved(s_shine, s_pcm_buf, &wr);
+                    if (mp3 && wr > 0 && s_rec_file) s_rec_bytes.fetch_add(fwrite(mp3, 1, wr, s_rec_file), std::memory_order_relaxed);
+                    s_pcm_count.store(0, std::memory_order_relaxed);
+                }
+            }
+        }
+    }
+    heap_caps_free(buf);
+    s_audio_task.store(nullptr, std::memory_order_release);
+    vTaskDelete(NULL);
+}
+
+/* ── Path sanitizer ─────────────────────────────────────────────── */
+
+static bool _path_sanitize(const char *user_path, char *out, size_t out_len) {
+    if (!user_path || !out || out_len == 0) return false;
+    out[0] = '\0';
+    if (user_path[0] == '\0') return false;
+
+    char full[256];
+    if (strncmp(user_path, "/sdcard", 7) == 0 && (user_path[7] == '\0' || user_path[7] == '/')) {
+        snprintf(full, sizeof(full), "%s", user_path);
+    } else if (user_path[0] == '/') {
+        snprintf(full, sizeof(full), "/sdcard%s", user_path);
+    } else {
+        snprintf(full, sizeof(full), "/sdcard/%s", user_path);
+    }
+
+    size_t len = strlen(full);
+    while (len > 1 && full[len - 1] == '/') full[--len] = '\0';
+    if (len == 0 || (len == 1 && full[0] == '/')) {
+        snprintf(full, sizeof(full), "/sdcard");
+        len = strlen(full);
+    }
+
+    {   /* Reject ".." as a path segment */
+        const char *p = full;
+        while (*p) {
+            if (*p == '/') p++;
+            if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0')) return false;
+            while (*p && *p != '/') p++;
+        }
+    }
+
+    if (strncmp(full, "/sdcard", 7) != 0) return false;
+    if (full[7] != '\0' && full[7] != '/') return false;
+
+    strlcpy(out, full, out_len);
+    return true;
+}
+
+/* URL-decode %XX sequences in-place */
+static int _hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    c = c & 0xDF;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static void _url_decode(char *s) {
+    char *r = s, *w = s;
+    while (*r) {
+        if (r[0] == '%' && r[1] && r[2]) {
+            int hi = _hex_digit(r[1]), lo = _hex_digit(r[2]);
+            if (hi >= 0 && lo >= 0) { *w++ = (char)((hi << 4) | lo); r += 3; }
+            else *w++ = *r++;
+        } else *w++ = *r++;
+    }
+    *w = '\0';
+}
+
+/* Playback output callback — writes to codec DAC */
+static int _asp_out(uint8_t *d, int sz, void *_) {
+    (void)_;
+    return AudioDriver::instance().codec_write(d, sz);
+}
+
+/* Playback event callback — tracks playing state */
+static int _asp_evt(esp_asp_event_pkt_t *pkt, void *_) {
+    (void)_;
+    if (pkt->type == ESP_ASP_EVENT_TYPE_STATE) {
+        int s = *(esp_asp_state_t*)pkt->payload;
+        if (s == ESP_ASP_STATE_FINISHED || s == ESP_ASP_STATE_STOPPED || s == ESP_ASP_STATE_ERROR)
+            s_playing = false;
+    }
+    return 0;
+}
 
 /* ── SNTP state ──────────────────────────────────────────────────── */
 static std::atomic<bool> s_sntp_initialized{false};
@@ -198,31 +366,57 @@ static const char *INDEX_HTML = R"rawliteral(
 <title>ESP32-S31 Korvo-1 配置</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; max-width: 600px; margin: 0 auto; }
-  h1 { text-align: center; color: #e94560; margin-bottom: 20px; }
-  .card { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-  .card h2 { font-size: 18px; color: #0f3460; background: #e94560; display: inline-block; padding: 4px 12px; border-radius: 6px; margin-bottom: 12px; }
-  label { display: block; font-size: 14px; color: #aaa; margin-bottom: 4px; }
-  input, select { width: 100%; padding: 10px; border: 1px solid #333; border-radius: 8px; background: #0f3460; color: #fff; font-size: 14px; margin-bottom: 12px; }
-  button { background: #e94560; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; width: 100%; }
+  body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 10px; max-width: 700px; margin: 0 auto; }
+  h1 { text-align: center; color: #e94560; margin-bottom: 10px; font-size: 20px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tab { flex: 1; padding: 8px; text-align: center; background: #16213e; color: #888; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px; }
+  .tab.active { background: #0f3460; color: #e94560; font-weight: bold; }
+  .card { background: #16213e; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .card h2 { font-size: 16px; color: #0f3460; background: #e94560; display: inline-block; padding: 3px 10px; border-radius: 6px; margin-bottom: 10px; }
+  label { display: block; font-size: 13px; color: #aaa; margin-bottom: 3px; }
+  input, select { width: 100%; padding: 8px; border: 1px solid #333; border-radius: 8px; background: #0f3460; color: #fff; font-size: 13px; margin-bottom: 10px; }
+  button { background: #e94560; color: #fff; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
   button:hover { background: #d63851; }
-  .status { font-size: 13px; color: #0f0; margin-top: 8px; }
+  button.sm { padding: 4px 10px; font-size: 12px; }
+  button.green { background: #2ecc71; }
+  button.red { background: #e74c3c; }
+  button.gray { background: #555; }
+  .status { font-size: 12px; color: #0f0; margin-top: 6px; }
   .error { color: #f44; }
-  table { width: 100%; font-size: 13px; border-collapse: collapse; margin-top: 8px; }
-  td { padding: 4px 8px; border-bottom: 1px solid #333; }
-  td:first-child { color: #888; width: 120px; }
+  table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 6px; }
+  td { padding: 3px 6px; border-bottom: 1px solid #333; }
+  td:first-child { color: #888; }
+  .flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .rec-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .rec-dot.on { background: #e74c3c; animation: blink 1s infinite; }
+  .rec-dot.off { background: #555; }
+  @keyframes blink { 50% { opacity: 0.3; } }
+  .hidden { display: none; }
+  .file-row { cursor: pointer; }
+  .file-row:hover { background: #1a3a5e; }
+  .file-row.selected { background: #0f3460; }
+  .progress { height: 4px; background: #333; border-radius: 2px; margin-top: 4px; }
+  .progress-bar { height: 100%; background: #e94560; border-radius: 2px; width: 0; }
 </style>
 </head>
 <body>
 <h1>ESP32-S31 Korvo-1</h1>
 
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('wifi')">WiFi</div>
+  <div class="tab" onclick="switchTab('audio')">Audio</div>
+  <div class="tab" onclick="switchTab('files')">Files</div>
+  <div class="tab" onclick="switchTab('system')">System</div>
+</div>
+
+<!-- WiFi Tab -->
+<div id="tab-wifi">
 <div class="card">
   <h2>WiFi 扫描</h2>
   <button onclick="scanWiFi()">扫描网络</button>
   <div id="scan-status" class="status"></div>
   <table id="scan-results"></table>
 </div>
-
 <div class="card">
   <h2>WiFi 连接</h2>
   <label>SSID</label><input type="text" id="ssid" placeholder="WiFi 名称">
@@ -230,93 +424,259 @@ static const char *INDEX_HTML = R"rawliteral(
   <button onclick="connectWiFi()">连接</button>
   <div id="wifi-status" class="status"></div>
 </div>
-
 <div class="card">
   <h2>音量控制</h2>
-  <label>音量 (0-100)</label>
-  <input type="range" id="volume" min="0" max="100" value="60" oninput="document.getElementById('volume-val').textContent=this.value">
-  <span id="volume-val" style="font-size:24px;vertical-align:middle;">60</span>
+  <div class="flex">
+    <input type="range" id="volume" min="0" max="100" value="60" oninput="document.getElementById('volume-val').textContent=this.value" style="flex:1">
+    <span id="volume-val" style="font-size:20px;">60</span>
+  </div>
   <button onclick="setVolume()">设置音量</button>
   <div id="vol-status" class="status"></div>
 </div>
+</div>
 
+<!-- Audio Tab -->
+<div id="tab-audio" class="hidden">
+<div class="card">
+  <h2>录音</h2>
+  <div class="flex">
+    <button class="green" id="btn-rec-start" onclick="recStart()">开始录音</button>
+    <button class="red" id="btn-rec-stop" onclick="recStop()" disabled>停止录音</button>
+    <span id="rec-indicator"><span class="rec-dot off"></span>空闲</span>
+  </div>
+  <div id="rec-status" class="status"></div>
+</div>
+<div class="card">
+  <h2>音乐播放</h2>
+  <div class="flex" style="margin-bottom:8px">
+    <button class="sm" onclick="loadMusicList()">刷新列表</button>
+    <button class="sm gray" id="btn-stop-play" onclick="stopPlay()" disabled>停止</button>
+  </div>
+  <div id="music-list" style="max-height:200px;overflow-y:auto;"></div>
+  <div id="play-status" class="status"></div>
+</div>
+</div>
+
+<!-- Files Tab -->
+<div id="tab-files" class="hidden">
+<div class="card">
+  <h2>文件管理器</h2>
+  <div class="flex" style="margin-bottom:8px">
+    <button class="sm" onclick="loadFileList('/')">根目录</button>
+    <button class="sm gray" id="btn-fm-del-sel" onclick="deleteSelected()" disabled>删除选中</button>
+    <button class="sm gray" onclick="downloadSelected()">下载选中</button>
+  </div>
+  <div id="fm-current" style="font-size:12px;color:#aaa;margin-bottom:4px;">/</div>
+  <div id="fm-capacity" style="font-size:11px;color:#666;margin-bottom:4px;"></div>
+  <div id="fm-list" style="max-height:300px;overflow-y:auto;"></div>
+  <div id="fm-status" class="status"></div>
+</div>
+</div>
+
+<!-- System Tab -->
+<div id="tab-system" class="hidden">
 <div class="card">
   <h2>系统信息</h2>
   <button onclick="refreshSysInfo()">刷新</button>
   <table id="sys-info"></table>
 </div>
+<div class="card">
+  <h2>ULog 记录</h2>
+  <div class="flex" style="margin-bottom:6px">
+    <span id="ulog-indicator"><span class="rec-dot off"></span>已停止</span>
+    <button class="sm green" id="btn-ulog-start" onclick="ulogStart()">启动</button>
+    <button class="sm red" id="btn-ulog-stop" onclick="ulogStop()" disabled>停止</button>
+  </div>
+  <div id="ulog-status" style="font-size:12px;color:#aaa;"></div>
+</div>
+</div>
 
 <script>
-async function apiGet(path) {
-  try { const r = await fetch(path); return await r.json(); }
-  catch(e) { return {error: e.message}; }
-}
-async function apiPost(path, body) {
-  try {
-    const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    return await r.json();
-  } catch(e) { return {error: e.message}; }
+var fmMode=false, fmCurrent='/', fmSelected=[];
+
+async function apiGet(p) { try { let r=await fetch(p); return await r.json(); } catch(e) { return {error:e.message}; } }
+async function apiPost(p, b) { try { let r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return await r.json(); } catch(e) { return {error:e.message}; } }
+
+function switchTab(t) {
+  ['wifi','audio','files','system'].forEach(x=>{
+    document.getElementById('tab-'+x).classList.toggle('hidden', x!==t);
+  });
+  document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active', el.textContent.trim().toLowerCase().indexOf(t)>=0 || (t==='system' && el.textContent.trim()==='System')));
+  if (t==='audio') loadMusicList();
+  if (t==='files') loadFileList('/');
+  if (t==='system') { refreshSysInfo(); refreshUlogStatus(); }
 }
 
 async function scanWiFi() {
-  document.getElementById('scan-status').textContent = '正在扫描...';
-  const data = await apiGet('/api/wifi/scan');
-  if (data.error) { document.getElementById('scan-status').innerHTML = '<span class="error">' + data.error + '</span>'; return; }
-  document.getElementById('scan-status').textContent = '找到 ' + (data.networks ? data.networks.length : 0) + ' 个网络';
-  let html = '<tr><td>SSID</td><td>信号</td><td>加密</td><td></td></tr>';
-  if (data.networks) {
-    data.networks.forEach(n => {
-      const auth = n.authmode > 0 ? 'WPA' : 'Open';
-      html += '<tr><td>' + n.ssid + '</td><td>' + n.rssi + ' dBm</td><td>' + auth + '</td>';
-      html += '<td><button style="padding:2px 8px;font-size:12px;" onclick="selectSSID(\'' + n.ssid + '\')">选择</button></td></tr>';
-    });
-  }
-  document.getElementById('scan-results').innerHTML = html;
-}
-
-function selectSSID(ssid) {
-  document.getElementById('ssid').value = ssid;
+  document.getElementById('scan-status').textContent='正在扫描...';
+  let d=await apiGet('/api/wifi/scan');
+  if(d.error){ document.getElementById('scan-status').innerHTML='<span class="error">'+d.error+'</span>'; return; }
+  document.getElementById('scan-status').textContent='找到 '+(d.networks?d.networks.length:0)+' 个网络';
+  let h='<tr><td>SSID</td><td>信号</td><td></td></tr>';
+  if(d.networks) d.networks.forEach(n=>{
+    h+='<tr><td>'+n.ssid+'</td><td>'+n.rssi+' dBm</td><td><button class="sm" onclick="document.getElementById(\'ssid\').value=\''+n.ssid+'\'">选择</button></td></tr>';
+  });
+  document.getElementById('scan-results').innerHTML=h;
 }
 
 async function connectWiFi() {
-  const ssid = document.getElementById('ssid').value;
-  const pass = document.getElementById('password').value;
-  if (!ssid) { document.getElementById('wifi-status').innerHTML = '<span class="error">请输入 SSID</span>'; return; }
-  document.getElementById('wifi-status').textContent = '正在连接...';
-  const data = await apiPost('/api/wifi/connect', {ssid, password:pass});
-  if (data.error) { document.getElementById('wifi-status').innerHTML = '<span class="error">' + data.error + '</span>'; }
-  else { document.getElementById('wifi-status').textContent = '已连接到 ' + data.ssid + ' IP: ' + data.ip; }
+  let ssid=document.getElementById('ssid').value, pass=document.getElementById('password').value;
+  if(!ssid){ document.getElementById('wifi-status').innerHTML='<span class="error">请输入 SSID</span>'; return; }
+  document.getElementById('wifi-status').textContent='正在连接...';
+  let d=await apiPost('/api/wifi/connect',{ssid,password:pass});
+  if(d.error) document.getElementById('wifi-status').innerHTML='<span class="error">'+d.error+'</span>';
+  else document.getElementById('wifi-status').textContent='已连接 '+d.ssid+' IP:'+d.ip;
 }
 
 async function setVolume() {
-  const vol = parseInt(document.getElementById('volume').value);
-  const data = await apiPost('/api/audio/volume', {volume:vol});
-  if (data.error) { document.getElementById('vol-status').innerHTML = '<span class="error">' + data.error + '</span>'; }
-  else { document.getElementById('vol-status').textContent = '音量已设置为 ' + data.volume; }
+  let v=parseInt(document.getElementById('volume').value);
+  let d=await apiPost('/api/audio/volume',{volume:v});
+  document.getElementById('vol-status').textContent=d.error?'错误':'音量: '+d.volume;
 }
 
+/* ── Audio Recording ── */
+async function recStart() {
+  let d=await apiGet('/api/audio/record_start');
+  if(!d.ok){ document.getElementById('rec-status').innerHTML='<span class="error">'+ (d.error||'失败') +'</span>'; return; }
+  document.getElementById('btn-rec-start').disabled=true;
+  document.getElementById('btn-rec-stop').disabled=false;
+  document.getElementById('rec-indicator').innerHTML='<span class="rec-dot on"></span>录音中...';
+  document.getElementById('rec-status').textContent='';
+  pollRecStatus();
+}
+async function recStop() {
+  let d=await apiGet('/api/audio/record_stop');
+  document.getElementById('btn-rec-start').disabled=false;
+  document.getElementById('btn-rec-stop').disabled=true;
+  document.getElementById('rec-indicator').innerHTML='<span class="rec-dot off"></span>空闲';
+  document.getElementById('rec-status').textContent=d.file?('已保存: '+d.file+' ('+Math.round(d.bytes/1024)+' KB)'):'';
+}
+async function pollRecStatus() {
+  let d=await apiGet('/api/audio/record_status');
+  if(d.recording){ document.getElementById('rec-status').textContent='已录 '+d.seconds+' 秒, '+Math.round(d.bytes/1024)+' KB'; setTimeout(pollRecStatus,1000); }
+}
+
+/* ── Music Playback ── */
+async function loadMusicList() {
+  let d=await apiGet('/api/audio/list');
+  let h='';
+  if(d.files && d.files.length>0) d.files.forEach(f=>{
+    h+='<div class="file-row" style="padding:4px 8px;display:flex;justify-content:space-between"><span>'+f+'</span><button class="sm green" onclick="playMusic(\''+f+'\')">播放</button></div>';
+  });
+  else h='<div style="color:#666;padding:8px">无 MP3 文件</div>';
+  document.getElementById('music-list').innerHTML=h;
+}
+async function playMusic(fn) {
+  document.getElementById('play-status').textContent='正在加载...';
+  document.getElementById('btn-stop-play').disabled=false;
+  let d=await apiGet('/api/audio/play?file='+encodeURIComponent(fn));
+  document.getElementById('play-status').textContent=d.ok?'正在播放: '+fn:'播放失败';
+}
+async function stopPlay() {
+  await apiGet('/api/audio/stop');
+  document.getElementById('play-status').textContent='已停止';
+  document.getElementById('btn-stop-play').disabled=true;
+}
+
+/* ── File Manager ── */
+async function loadFileList(dir) {
+  fmCurrent=dir; fmSelected=[];
+  document.getElementById('fm-current').textContent=dir;
+  document.getElementById('btn-fm-del-sel').disabled=true;
+  let d=await apiGet('/api/files/list?dir='+encodeURIComponent(dir));
+  if(!d.ok){ document.getElementById('fm-status').innerHTML='<span class="error">'+ (d.error||'加载失败') +'</span>'; return; }
+  document.getElementById('fm-capacity').textContent='已用: '+(d.total_kb?(Math.round((d.total_kb-d.free_kb)/1024*10)/10)+' MB / '+(Math.round(d.total_kb/1024*10)/10)+' MB':'?');
+  let h='';
+  if(dir!=='/') h+='<div class="file-row" style="padding:4px 8px;color:#e94560" onclick="loadFileList(\''+getParentDir()+'\')">📁 ..</div>';
+  if(d.files) d.files.forEach(f=>{
+    let icon=f.is_dir?'📁':'📄';
+    let sz=f.is_dir?'':formatSize(f.size);
+    if(f.is_dir) {
+      h+='<div class="file-row" style="padding:4px 8px;display:flex;justify-content:space-between" onclick="event.stopPropagation();loadFileList((fmCurrent===\'/\'?\'\':fmCurrent)+\'/\'+f.name)">';
+    } else {
+      h+='<div class="file-row" style="padding:4px 8px;display:flex;justify-content:space-between" onclick="toggleFile(\''+f.name+'\',event)">';
+    }
+    h+='<span>'+icon+' '+f.name+'</span><span style="color:#666;font-size:11px">'+sz+'</span></div>';
+  });
+  document.getElementById('fm-list').innerHTML=h||'<div style="color:#666;padding:8px">目录为空</div>';
+  document.getElementById('fm-status').textContent='';
+}
+function getParentDir() {
+  let p=fmCurrent.split('/').filter(Boolean); p.pop();
+  return '/'+p.join('/')||'/';
+}
+function toggleFile(name, evt) {
+  evt.stopPropagation();
+  let idx=fmSelected.indexOf(name);
+  if(idx>=0) fmSelected.splice(idx,1); else fmSelected.push(name);
+  document.getElementById('btn-fm-del-sel').disabled=fmSelected.length===0;
+  document.querySelectorAll('#fm-list .file-row').forEach((el,i)=>{
+    let nm=el.querySelector('span').textContent.trim();
+    if(nm.startsWith('📁')) nm=nm.substring(2).trim();
+    else if(nm.startsWith('📄')) nm=nm.substring(2).trim();
+    if(nm==='..') return;
+    el.classList.toggle('selected', fmSelected.indexOf(nm)>=0);
+  });
+}
+async function deleteSelected() {
+  if(fmSelected.length===0) return;
+  let paths=fmSelected.map(f=>fmCurrent==='/'?'/'+f:fmCurrent+'/'+f);
+  let d=await apiPost('/api/files/delete_batch',{paths:paths});
+  document.getElementById('fm-status').textContent='已删除: '+d.deleted+', 失败: '+d.failed;
+  loadFileList(fmCurrent);
+}
+function downloadSelected() {
+  fmSelected.forEach(f=>{
+    let p=fmCurrent==='/'?'/'+f:fmCurrent+'/'+f;
+    window.open('/api/files/download?path='+encodeURIComponent(p), '_blank');
+  });
+}
+function formatSize(b) {
+  if(b<1024) return b+' B';
+  if(b<1048576) return (b/1024).toFixed(1)+' KB';
+  return (b/1048576).toFixed(1)+' MB';
+}
+
+/* ── ULog ── */
+async function refreshUlogStatus() {
+  let d=await apiGet('/api/ulog/status');
+  let running=d.running;
+  document.getElementById('ulog-indicator').innerHTML='<span class="rec-dot '+(running?'on':'off')+'"></span>'+(running?'运行中':'已停止');
+  document.getElementById('btn-ulog-start').disabled=running;
+  document.getElementById('btn-ulog-stop').disabled=!running;
+  document.getElementById('ulog-status').textContent=d.filepath?('文件: '+d.filepath+' ('+Math.round(d.bytes_written/1024)+' KB)'):'';
+}
+async function ulogStart() {
+  let d=await apiPost('/api/ulog/start',{});
+  if(d.ok) refreshUlogStatus();
+}
+async function ulogStop() {
+  let d=await apiPost('/api/ulog/stop',{});
+  if(d.ok) refreshUlogStatus();
+}
+
+/* ── System Info ── */
 async function refreshSysInfo() {
-  const data = await apiGet('/api/system/info');
-  let html = '';
-  if (data.error) { html = '<tr><td colspan="2" class="error">' + data.error + '</td></tr>'; }
+  let d=await apiGet('/api/system/info');
+  let h='';
+  if(d.error) h='<tr><td colspan="2" class="error">'+d.error+'</td></tr>';
   else {
-    html += '<tr><td>芯片</td><td>' + (data.chip || 'N/A') + '</td></tr>';
-    html += '<tr><td>CPU 频率</td><td>' + (data.cpu_freq || 'N/A') + ' MHz</td></tr>';
-    html += '<tr><td>Flash 大小</td><td>' + (data.flash_size || 'N/A') + ' MB</td></tr>';
-    html += '<tr><td>PSRAM</td><td>' + (data.psram_size || 'N/A') + ' MB</td></tr>';
-    html += '<tr><td>SDK</td><td>' + (data.sdk_version || 'N/A') + '</td></tr>';
-    html += '<tr><td>WiFi</td><td>' + (data.wifi_connected ? '已连接 '+data.wifi_ssid : '未连接') + '</td></tr>';
-    html += '<tr><td>SD 卡</td><td>' + (data.sdcard_mounted ? '已挂载' : '未检测到') + '</td></tr>';
-    html += '<tr><td>空闲堆内存</td><td>' + (data.free_heap || 'N/A') + ' KB</td></tr>';
-    html += '<tr><td>运行时间</td><td>' + (data.uptime || 'N/A') + ' 秒</td></tr>';
-    html += '<tr><td>NTP 同步</td><td>' + (data.sntp_synced ? '✅ 已同步' : '⏳ 未同步') + '</td></tr>';
-    html += '<tr><td>时区</td><td>' + (data.timezone || 'N/A') + '</td></tr>';
-    if (data.current_time) { html += '<tr><td>当前时间</td><td>' + data.current_time + '</td></tr>'; }
+    h+='<tr><td>芯片</td><td>'+(d.chip||'N/A')+'</td></tr>';
+    h+='<tr><td>CPU</td><td>'+(d.cpu_freq||'N/A')+' MHz</td></tr>';
+    h+='<tr><td>Flash</td><td>'+(d.flash_size||'N/A')+' MB</td></tr>';
+    h+='<tr><td>PSRAM</td><td>'+(d.psram_size||'N/A')+' MB</td></tr>';
+    h+='<tr><td>SDK</td><td>'+(d.sdk_version||'N/A')+'</td></tr>';
+    h+='<tr><td>WiFi</td><td>'+(d.wifi_connected?'已连接 '+d.wifi_ssid:'未连接')+'</td></tr>';
+    h+='<tr><td>SD 卡</td><td>'+(d.sdcard_mounted?'已挂载':'未检测到')+'</td></tr>';
+    h+='<tr><td>空闲堆内存</td><td>'+(d.free_heap||'N/A')+' KB</td></tr>';
+    h+='<tr><td>运行时间</td><td>'+(d.uptime||'N/A')+' 秒</td></tr>';
+    h+='<tr><td>NTP</td><td>'+(d.sntp_synced?'✅ 已同步':'⏳ 未同步')+'</td></tr>';
+    h+='<tr><td>时区</td><td>'+(d.timezone||'N/A')+'</td></tr>';
+    if(d.current_time) h+='<tr><td>当前时间</td><td>'+d.current_time+'</td></tr>';
   }
-  document.getElementById('sys-info').innerHTML = html;
+  document.getElementById('sys-info').innerHTML=h;
 }
 
-// Auto-refresh system info on load
 refreshSysInfo();
 </script>
 </body>
@@ -688,6 +1048,394 @@ static esp_err_t _api_sdcard_info(httpd_req_t *req) {
     return ESP_OK;
 }
 
+/* ── Audio Recording / Playback / File Manager / ULog handlers ── */
+
+/* GET /api/audio/record_start */
+static esp_err_t _api_rec_start(httpd_req_t *req) {
+    audio_lock();
+    if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK; }
+    if (s_fm_busy) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"File manager busy\"}"); return ESP_OK; }
+    if (!AudioDriver::instance().available()) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio not available\"}"); return ESP_OK; }
+    if (!s_audio_task.load(std::memory_order_acquire)) {
+        s_audio_running = true;
+        s_audio_stack = (StackType_t *)heap_caps_malloc(12 * 1024 * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_audio_stack) { s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+        TaskHandle_t h = xTaskCreateStaticPinnedToCore(audio_task, "w_audio", 12 * 1024, NULL, 1, s_audio_stack, s_audio_tcb, 1);
+        s_audio_task.store(h, std::memory_order_release);
+        if (!h) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    }
+    s_pcm_buf = (int16_t*)heap_caps_calloc(1, PCM_BUF_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_pcm_buf) { audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    s_pcm_count.store(0, std::memory_order_relaxed);
+    shine_config_t c; shine_set_config_mpeg_defaults(&c.mpeg);
+    c.wave.channels = PCM_STEREO; c.wave.samplerate = 48000; c.mpeg.mode = STEREO; c.mpeg.bitr = 128;
+    s_shine = shine_initialise(&c);
+    if (!s_shine) { heap_caps_free(s_pcm_buf); s_pcm_buf = NULL; audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    struct timeval tv; gettimeofday(&tv, NULL);
+    time_t t = tv.tv_sec; struct tm tm_buf;
+    localtime_r(&t, &tm_buf);
+    if (tm_buf.tm_year + 1900 > 2020) {
+        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%04d%02d%02d_%02d%02d%02d.mp3",
+                 tm_buf.tm_year+1900, tm_buf.tm_mon+1, tm_buf.tm_mday, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec);
+    } else {
+        uint32_t mono_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%lu.mp3", (unsigned long)mono_ms);
+    }
+    s_rec_file = fopen(s_rec_path, "wb");
+    if (!s_rec_file) { shine_close(s_shine); s_shine = NULL; heap_caps_free(s_pcm_buf); s_pcm_buf = NULL;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    s_rec_bytes = 0; s_rec_start_ms.store((uint32_t)(esp_timer_get_time() / 1000), std::memory_order_relaxed);
+    s_is_recording = true;
+
+    /* Stop any active playback — recording and playback share I2S */
+    if (s_asp && s_playing) {
+        esp_asp_handle_t old = s_asp; s_asp = NULL; s_playing = false;
+        audio_unlock();
+        esp_audio_simple_player_stop(old);
+        esp_audio_simple_player_destroy(old);
+        audio_lock();
+        if (s_asp && s_playing) {  /* Re-check */
+            esp_asp_handle_t old2 = s_asp; s_asp = NULL; s_playing = false;
+            audio_unlock();
+            esp_audio_simple_player_stop(old2);
+            esp_audio_simple_player_destroy(old2);
+            audio_lock();
+        }
+    }
+    audio_unlock();
+    ESP_LOGI(TAG, "Recording: %s", s_rec_path);
+    httpd_resp_sendstr(req, "{\"ok\":1}");
+    return ESP_OK;
+}
+
+/* GET /api/audio/record_stop */
+static esp_err_t _api_rec_stop(httpd_req_t *req) {
+    audio_lock();
+    if (!s_is_recording) {
+        _stop_audio_task_if_running();
+        if (s_shine) { shine_close(s_shine); s_shine = NULL; }
+        if (s_pcm_buf) { heap_caps_free(s_pcm_buf); s_pcm_buf = NULL; }
+        if (s_rec_file) { fclose(s_rec_file); s_rec_file = NULL; }
+        audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+    }
+    s_is_recording = false;
+    _stop_audio_task_if_running();
+    FILE *f = s_rec_file; s_rec_file = NULL;
+    if (s_shine) { int wr = 0; unsigned char *d = shine_flush(s_shine, &wr); if (d && wr > 0 && f) fwrite(d, 1, wr, f); shine_close(s_shine); s_shine = NULL; }
+    if (f) fclose(f);
+    if (s_pcm_buf) { heap_caps_free(s_pcm_buf); s_pcm_buf = NULL; }
+    char saved[128]; strlcpy(saved, s_rec_path, sizeof(saved));
+    uint32_t saved_bytes = s_rec_bytes.load(std::memory_order_relaxed);
+    audio_unlock();
+    char r[256]; snprintf(r, sizeof(r), "{\"ok\":1,\"file\":\"%s\",\"bytes\":%lu}", saved, (unsigned long)saved_bytes);
+    ESP_LOGI(TAG, "Saved: %s (%lu)", saved, (unsigned long)saved_bytes);
+    httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+/* GET /api/audio/record_status */
+static esp_err_t _api_rec_status(httpd_req_t *req) {
+    char r[128];
+    if (s_is_recording) {
+        audio_lock();
+        uint32_t bytes = s_rec_bytes.load(std::memory_order_relaxed);
+        uint32_t start_ms = s_rec_start_ms.load(std::memory_order_relaxed);
+        audio_unlock();
+        uint32_t e = (uint32_t)((esp_timer_get_time() / 1000 - start_ms) / 1000);
+        snprintf(r, sizeof(r), "{\"recording\":1,\"seconds\":%lu,\"bytes\":%lu}", (unsigned long)e, (unsigned long)bytes);
+    } else snprintf(r, sizeof(r), "{\"recording\":0}");
+    httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+/* GET /api/audio/list */
+static esp_err_t _api_audio_list(httpd_req_t *req) {
+    if (!SDCardDriver::instance().available()) {
+        httpd_resp_send_500(req); return ESP_FAIL;
+    }
+    DIR *d = opendir(SDMMC_MOUNT_POINT);
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+    if (!root || !arr) { if (d) closedir(d); if (arr) cJSON_Delete(arr); if (root) cJSON_Delete(root); httpd_resp_send_500(req); return ESP_FAIL; }
+    cJSON_AddItemToObject(root, "files", arr);
+    if (d) { struct dirent *e; while ((e = readdir(d))) { if (e->d_name[0] == '.') continue; char *x = strrchr(e->d_name, '.'); if (x && strcasecmp(x, ".mp3") == 0) cJSON_AddItemToArray(arr, cJSON_CreateString(e->d_name)); } closedir(d); }
+    char *j = cJSON_PrintUnformatted(root);
+    if (!j) { cJSON_Delete(root); httpd_resp_send_500(req); return ESP_FAIL; }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, j, strlen(j));
+    cJSON_free(j); cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* GET /api/audio/play?file=xxx.mp3 */
+static esp_err_t _api_play(httpd_req_t *req) {
+    audio_lock();
+    if (!AudioDriver::instance().available()) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio not available\"}"); return ESP_OK; }
+    char q[256] = {}, fn[128] = {};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK || !strlen(q)) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    httpd_query_key_value(q, "file", fn, sizeof(fn));
+    if (!strlen(fn)) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    _url_decode(fn);
+    char safe[256];
+    if (!_path_sanitize(fn, safe, sizeof(safe))) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Invalid path\"}"); return ESP_OK; }
+    char uri[300]; snprintf(uri, sizeof(uri), "file://%s", safe);
+    if (s_fm_busy) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"File manager busy\"}"); return ESP_OK; }
+    if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Recording in progress\"}"); return ESP_OK; }
+    if (s_asp) {
+        esp_asp_handle_t old = s_asp; s_asp = NULL; s_playing = false;
+        audio_unlock();
+        esp_audio_simple_player_stop(old);
+        esp_audio_simple_player_destroy(old);
+        audio_lock();
+        if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Recording in progress\"}"); return ESP_OK; }
+    }
+    s_playing = false;
+    esp_asp_cfg_t c = {.out = {.cb = _asp_out}, .task_prio = 3, .task_stack = 8192, .task_core = 1, .task_stack_in_ext = true};
+    if (esp_audio_simple_player_new(&c, &s_asp) != ESP_GMF_ERR_OK || !s_asp) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    esp_audio_simple_player_set_event(s_asp, _asp_evt, NULL);
+    esp_gmf_err_t ret = esp_audio_simple_player_run(s_asp, uri, NULL);
+    if (ret != ESP_GMF_ERR_OK) {
+        ESP_LOGE(TAG, "Play failed: %d, uri=%s", ret, uri);
+        esp_audio_simple_player_destroy(s_asp); s_asp = NULL;
+        audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
+    }
+    s_playing = true; audio_unlock();
+    ESP_LOGI(TAG, "Play: %s", uri);
+    httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+}
+
+/* GET /api/audio/stop */
+static esp_err_t _api_stop(httpd_req_t *req) {
+    audio_lock();
+    if (s_asp) { esp_audio_simple_player_stop(s_asp); s_playing = false; }
+    audio_unlock();
+    httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+}
+
+/* ── File Manager Handlers ── */
+
+/* GET /api/files/list?dir=/ */
+static esp_err_t _api_files_list(httpd_req_t *req) {
+    if (!SDCardDriver::instance().available()) {
+        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK;
+    }
+    char q[256] = {};
+    char raw_dir[128] = "/";
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && strlen(q) > 0) {
+        httpd_query_key_value(q, "dir", raw_dir, sizeof(raw_dir));
+    }
+    if (raw_dir[0] == '\0') strlcpy(raw_dir, "/", sizeof(raw_dir));
+    _url_decode(raw_dir);
+    char dir[256];
+    if (!_path_sanitize(raw_dir, dir, sizeof(dir))) {
+        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Invalid path\"}"); return ESP_OK;
+    }
+    DIR *d = opendir(dir);
+    if (!d) { httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Cannot open directory\"}"); return ESP_OK; }
+
+    uint64_t total_kb = 0, free_kb = 0;
+    {   /* Get filesystem capacity via fatfs */
+        DIR *d2 = opendir("/sdcard");
+        if (d2) {
+            FATFS *fs; DWORD free_clust;
+            if (f_getfree("", &free_clust, &fs) == FR_OK && fs) {
+                total_kb = (fs->n_fatent - 2) * fs->csize * fs->ssize / 1024;
+                free_kb = free_clust * fs->csize * fs->ssize / 1024;
+            }
+            closedir(d2);
+        }
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "ok", 1);
+    cJSON *files_arr = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "files", files_arr);
+
+    const char *display = dir;
+    if (strncmp(dir, "/sdcard", 7) == 0) { display = dir + 7; if (display[0] == '\0') display = "/"; }
+    cJSON_AddStringToObject(root, "current", display);
+    cJSON_AddNumberToObject(root, "total_kb", (double)total_kb);
+    cJSON_AddNumberToObject(root, "free_kb", (double)free_kb);
+
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        char fpath[512]; snprintf(fpath, sizeof(fpath), "%s/%s", dir, e->d_name);
+        struct stat st;
+        bool is_dir = false; int64_t fsize = 0; time_t mtime = 0;
+        if (stat(fpath, &st) == 0) { is_dir = S_ISDIR(st.st_mode); fsize = is_dir ? 0 : (int64_t)st.st_size; mtime = st.st_mtime; }
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "name", e->d_name);
+        cJSON_AddBoolToObject(item, "is_dir", is_dir);
+        cJSON_AddNumberToObject(item, "size", (double)fsize);
+        cJSON_AddNumberToObject(item, "mtime", (double)mtime);
+        cJSON_AddItemToArray(files_arr, item);
+    }
+    closedir(d);
+
+    char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    if (json) { httpd_resp_send(req, json, strlen(json)); cJSON_free(json); }
+    else httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "JSON build failed");
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* GET /api/files/download?path=xxx */
+static esp_err_t _api_files_download(httpd_req_t *req) {
+    if (!SDCardDriver::instance().available()) { httpd_resp_sendstr(req, "SD card not available"); return ESP_OK; }
+    audio_lock();
+    if (s_is_recording || s_playing) { audio_unlock(); httpd_resp_sendstr(req, "Audio is active"); return ESP_OK; }
+    audio_unlock();
+
+    char q[256] = {}, raw[256] = {};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK || !strlen(q)) { httpd_resp_sendstr(req, "Missing path"); return ESP_OK; }
+    httpd_query_key_value(q, "path", raw, sizeof(raw));
+    if (!strlen(raw)) { httpd_resp_sendstr(req, "Missing path"); return ESP_OK; }
+    _url_decode(raw);
+
+    char fpath[320];
+    if (!_path_sanitize(raw, fpath, sizeof(fpath))) { httpd_resp_sendstr(req, "Invalid path"); return ESP_OK; }
+
+    struct stat st;
+    if (stat(fpath, &st) != 0 || S_ISDIR(st.st_mode)) { httpd_resp_sendstr(req, "Not a file"); return ESP_OK; }
+
+    FILE *f = fopen(fpath, "rb");
+    if (!f) { httpd_resp_sendstr(req, "Cannot open file"); return ESP_OK; }
+
+    audio_lock();
+    if (s_is_recording || s_playing) { audio_unlock(); fclose(f); httpd_resp_sendstr(req, "Audio is active"); return ESP_OK; }
+    s_fm_busy = true;
+    audio_unlock();
+
+    fseek(f, 0, SEEK_END); long fsize = ftell(f); fseek(f, 0, SEEK_SET);
+    const char *fname = strrchr(fpath, '/'); fname = fname ? fname + 1 : fpath;
+    char disp[384]; snprintf(disp, sizeof(disp), "attachment; filename=\"%s\"", fname);
+    httpd_resp_set_hdr(req, "Content-Disposition", disp);
+    httpd_resp_set_type(req, "application/octet-stream");
+    if (fsize > 0) { char clen[32]; snprintf(clen, sizeof(clen), "%ld", fsize); httpd_resp_set_hdr(req, "Content-Length", clen); }
+
+    uint8_t *chunk = (uint8_t *)malloc(1024);
+    if (!chunk) { fclose(f); s_fm_busy = false; httpd_resp_sendstr(req, "Out of memory"); return ESP_OK; }
+    size_t n;
+    while ((n = fread(chunk, 1, 1024, f)) > 0) {
+        if (httpd_resp_send_chunk(req, (const char *)chunk, (int)n) != ESP_OK) break;
+    }
+    free(chunk);
+    httpd_resp_send_chunk(req, NULL, 0);
+    fclose(f);
+    s_fm_busy = false;
+    ESP_LOGI(TAG, "File downloaded: %s (%ld bytes)", fpath, fsize);
+    return ESP_OK;
+}
+
+/* POST /api/files/delete — body: {"path": "xxx"} */
+static esp_err_t _api_files_delete(httpd_req_t *req) {
+    if (!SDCardDriver::instance().available()) { httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK; }
+    audio_lock();
+    if (s_is_recording || s_playing) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio is active\"}"); return ESP_OK; }
+    s_fm_busy = true; audio_unlock();
+
+    char buf[512]; int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Empty body\"}"); return ESP_OK; }
+    buf[received] = '\0';
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Invalid JSON\"}"); return ESP_OK; }
+    cJSON *j_path = cJSON_GetObjectItem(root, "path");
+    if (!j_path || !cJSON_IsString(j_path) || !j_path->valuestring) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Missing path\"}"); cJSON_Delete(root); return ESP_OK; }
+    char fpath[320]; bool safe = _path_sanitize(j_path->valuestring, fpath, sizeof(fpath));
+    cJSON_Delete(root);
+    if (!safe) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Invalid path\"}"); return ESP_OK; }
+
+    struct stat st;
+    if (stat(fpath, &st) != 0) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"File not found\"}"); return ESP_OK; }
+    if (S_ISDIR(st.st_mode)) {
+        if (rmdir(fpath) != 0) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Cannot delete directory\"}"); return ESP_OK; }
+    } else {
+        if (unlink(fpath) != 0) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Delete failed\"}"); return ESP_OK; }
+    }
+    s_fm_busy = false;
+    ESP_LOGI(TAG, "File deleted: %s", fpath);
+    httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+}
+
+/* POST /api/files/delete_batch — body: {"paths": ["xxx", "yyy"]} */
+static esp_err_t _api_files_delete_batch(httpd_req_t *req) {
+    if (!SDCardDriver::instance().available()) { httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK; }
+    audio_lock();
+    if (s_is_recording || s_playing) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio is active\"}"); return ESP_OK; }
+    s_fm_busy = true; audio_unlock();
+
+    const size_t kMaxBody = 4096;
+    if (req->content_len > kMaxBody) { s_fm_busy = false; char err[80]; snprintf(err, sizeof(err), "{\"ok\":0,\"error\":\"Request too large (max %u bytes)\"}", (unsigned)kMaxBody); httpd_resp_sendstr(req, err); return ESP_OK; }
+    char *buf = (char *)malloc(kMaxBody);
+    if (!buf) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Out of memory\"}"); return ESP_OK; }
+    int received = httpd_req_recv(req, buf, kMaxBody - 1);
+    if (received <= 0) { free(buf); s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Empty body\"}"); return ESP_OK; }
+    buf[received] = '\0';
+    cJSON *root = cJSON_Parse(buf); free(buf);
+    if (!root) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Invalid JSON\"}"); return ESP_OK; }
+    cJSON *j_paths = cJSON_GetObjectItem(root, "paths");
+    if (!j_paths || !cJSON_IsArray(j_paths)) { s_fm_busy = false; httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Missing paths array\"}"); cJSON_Delete(root); return ESP_OK; }
+
+    int deleted = 0, failed = 0;
+    char fpath[320];
+    cJSON *item;
+    cJSON_ArrayForEach(item, j_paths) {
+        if (!cJSON_IsString(item) || !item->valuestring) { failed++; continue; }
+        if (!_path_sanitize(item->valuestring, fpath, sizeof(fpath))) { failed++; continue; }
+        struct stat st;
+        if (stat(fpath, &st) != 0) { failed++; continue; }
+        int ret = S_ISDIR(st.st_mode) ? rmdir(fpath) : unlink(fpath);
+        if (ret == 0) deleted++; else failed++;
+    }
+    cJSON_Delete(root);
+    s_fm_busy = false;
+    char resp[128]; snprintf(resp, sizeof(resp), "{\"ok\":1,\"deleted\":%d,\"failed\":%d}", deleted, failed);
+    httpd_resp_sendstr(req, resp); return ESP_OK;
+}
+
+/* ── ULog handlers ── */
+
+/* GET /api/ulog/status */
+static esp_err_t _api_ulog_status(httpd_req_t *req) {
+    ulog_writer_t *ulog = ulog_writer_get();
+    cJSON *root = cJSON_CreateObject();
+    if (!root) { httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OOM"); return ESP_FAIL; }
+    cJSON_AddBoolToObject(root, "running", ulog_writer_get_state(ulog) == ULOG_STATE_RUNNING);
+    const char *fp = ulog_writer_get_filepath(ulog);
+    cJSON_AddStringToObject(root, "filepath", fp ? fp : "");
+    cJSON_AddNumberToObject(root, "bytes_written", (double)ulog_writer_get_bytes_written(ulog));
+    const char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    if (json) { httpd_resp_sendstr(req, json); cJSON_free((void *)json); }
+    else httpd_resp_sendstr(req, "{}");
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* POST /api/ulog/start */
+static esp_err_t _api_ulog_start(httpd_req_t *req) {
+    if (!SDCardDriver::instance().available()) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK;
+    }
+    ulog_writer_t *ulog = ulog_writer_get();
+    esp_err_t err = ulog_writer_start(ulog);
+    httpd_resp_set_type(req, "application/json");
+    if (err == ESP_OK) httpd_resp_sendstr(req, "{\"ok\":1}");
+    else httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Start failed\"}");
+    return ESP_OK;
+}
+
+/* POST /api/ulog/stop */
+static esp_err_t _api_ulog_stop(httpd_req_t *req) {
+    ulog_writer_t *ulog = ulog_writer_get();
+    ulog_writer_stop(ulog);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+}
+
 /* ── Web UI handler ──────────────────────────────────────────────── */
 
 /* GET / — serve index HTML */
@@ -704,67 +1452,72 @@ static void _register_handlers(httpd_handle_t server) {
     memset(&uri, 0, sizeof(uri));
 
     /* Web UI */
-    uri.uri = "/";
-    uri.method = HTTP_GET;
-    uri.handler = _index_handler;
+    uri.uri = "/"; uri.method = HTTP_GET; uri.handler = _index_handler;
     httpd_register_uri_handler(server, &uri);
 
     /* WiFi APIs */
-    uri.uri = "/api/wifi/scan";
-    uri.method = HTTP_GET;
-    uri.handler = _api_wifi_scan;
+    uri.uri = "/api/wifi/scan"; uri.method = HTTP_GET; uri.handler = _api_wifi_scan;
     httpd_register_uri_handler(server, &uri);
-
-    uri.uri = "/api/wifi/connect";
-    uri.method = HTTP_POST;
-    uri.handler = _api_wifi_connect;
+    uri.uri = "/api/wifi/connect"; uri.method = HTTP_POST; uri.handler = _api_wifi_connect;
     httpd_register_uri_handler(server, &uri);
-
-    uri.uri = "/api/wifi/status";
-    uri.method = HTTP_GET;
-    uri.handler = _api_wifi_status;
+    uri.uri = "/api/wifi/status"; uri.method = HTTP_GET; uri.handler = _api_wifi_status;
     httpd_register_uri_handler(server, &uri);
 
     /* System APIs */
-    uri.uri = "/api/system/info";
-    uri.method = HTTP_GET;
-    uri.handler = _api_system_info;
+    uri.uri = "/api/system/info"; uri.method = HTTP_GET; uri.handler = _api_system_info;
     httpd_register_uri_handler(server, &uri);
-
-    uri.uri = "/api/system/stats";
-    uri.method = HTTP_GET;
-    uri.handler = _api_system_stats;
+    uri.uri = "/api/system/stats"; uri.method = HTTP_GET; uri.handler = _api_system_stats;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/system/timezone"; uri.method = HTTP_GET; uri.handler = _api_timezone_get;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/system/timezone"; uri.method = HTTP_POST; uri.handler = _api_timezone_set;
     httpd_register_uri_handler(server, &uri);
 
     /* Audio APIs */
-    uri.uri = "/api/audio/volume";
-    uri.method = HTTP_POST;
-    uri.handler = _api_audio_volume_set;
+    uri.uri = "/api/audio/volume"; uri.method = HTTP_POST; uri.handler = _api_audio_volume_set;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/audio/volume"; uri.method = HTTP_GET; uri.handler = _api_audio_volume_get;
     httpd_register_uri_handler(server, &uri);
 
-    uri.uri = "/api/audio/volume";
-    uri.method = HTTP_GET;
-    uri.handler = _api_audio_volume_get;
+    /* Audio recording APIs */
+    uri.uri = "/api/audio/record_start"; uri.method = HTTP_GET; uri.handler = _api_rec_start;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/audio/record_stop"; uri.method = HTTP_GET; uri.handler = _api_rec_stop;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/audio/record_status"; uri.method = HTTP_GET; uri.handler = _api_rec_status;
+    httpd_register_uri_handler(server, &uri);
+
+    /* Audio playback APIs */
+    uri.uri = "/api/audio/list"; uri.method = HTTP_GET; uri.handler = _api_audio_list;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/audio/play"; uri.method = HTTP_GET; uri.handler = _api_play;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/audio/stop"; uri.method = HTTP_GET; uri.handler = _api_stop;
+    httpd_register_uri_handler(server, &uri);
+
+    /* File Manager APIs */
+    uri.uri = "/api/files/list"; uri.method = HTTP_GET; uri.handler = _api_files_list;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/files/download"; uri.method = HTTP_GET; uri.handler = _api_files_download;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/files/delete"; uri.method = HTTP_POST; uri.handler = _api_files_delete;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/files/delete_batch"; uri.method = HTTP_POST; uri.handler = _api_files_delete_batch;
+    httpd_register_uri_handler(server, &uri);
+
+    /* ULog APIs */
+    uri.uri = "/api/ulog/status"; uri.method = HTTP_GET; uri.handler = _api_ulog_status;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/ulog/start"; uri.method = HTTP_POST; uri.handler = _api_ulog_start;
+    httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/ulog/stop"; uri.method = HTTP_POST; uri.handler = _api_ulog_stop;
     httpd_register_uri_handler(server, &uri);
 
     /* SD Card APIs */
-    uri.uri = "/api/sdcard/info";
-    uri.method = HTTP_GET;
-    uri.handler = _api_sdcard_info;
+    uri.uri = "/api/sdcard/info"; uri.method = HTTP_GET; uri.handler = _api_sdcard_info;
     httpd_register_uri_handler(server, &uri);
 
-    /* Timezone APIs */
-    uri.uri = "/api/system/timezone";
-    uri.method = HTTP_GET;
-    uri.handler = _api_timezone_get;
-    httpd_register_uri_handler(server, &uri);
-
-    uri.uri = "/api/system/timezone";
-    uri.method = HTTP_POST;
-    uri.handler = _api_timezone_set;
-    httpd_register_uri_handler(server, &uri);
-
-    ESP_LOGI(TAG, "HTTP handlers registered");
+    ESP_LOGI(TAG, "HTTP handlers registered (%d endpoints)", 24);
 }
 
 /* ── mDNS ────────────────────────────────────────────────────────── */
@@ -869,10 +1622,20 @@ void web_config_server_start(void) {
         return;
     }
 
+    /* Create audio mutex before starting the server (handlers use it immediately) */
+    if (!s_audio_mutex) {
+        s_audio_mutex = xSemaphoreCreateMutex();
+    }
+
+    /* Pre-allocate audio task TCB */
+    if (!s_audio_tcb) {
+        s_audio_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 8080;
     config.ctrl_port = 32769;  /* Different from captive portal's default 32768 */
-    config.max_uri_handlers = 14;
+    config.max_uri_handlers = 32;
     config.max_open_sockets = 8;
     config.lru_purge_enable = true;
     config.core_id = 0;

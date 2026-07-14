@@ -19,9 +19,9 @@
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
 | A1 | **Audio 驱动基础** | ES8389 编解码器初始化 (I2S + I2C), 双 Mic + 双 Speaker 通路建立。⚠️ MCLK 不可用，采样率 16kHz | ✅ 已完成 |
-| A2 | **Audio 录音** | 双 Mic → ES8389 ADC → I2S RX → MP3/WAV 编码 → SD 卡存储 | ⏳ 待开发 |
-| A3 | **Audio 播放** | SD 卡 → MP3/WAV 解码 → I2S TX → ES8389 DAC → NS4150B PA → 扬声器 | ⏳ 待开发 |
-| A4 | **Audio 音量控制** | ES8389 硬件音量调节, 按键 (VOL+/VOL-) 和 API 控制, NVS 持久化 | ⏳ 待开发 |
+| A2 | **Audio 录音** | 双 Mic → ES8389 ADC → I2S RX → MP3 编码 → SD 卡存储 | ✅ 已完成 |
+| A3 | **Audio 播放** | SD 卡 → MP3 解码 → I2S TX → ES8389 DAC → NS4150B PA → 扬声器 | ✅ 已完成 |
+| A4 | **Audio 音量控制** | ES8389 硬件音量调节, 按键 (VOL+/VOL-) 和 API 控制, NVS 持久化 | ✅ 已完成 |
 | A5 | **语音唤醒 (Wake Word)** | ESP-Skainet 本地语音唤醒引擎, 低功耗后台运行 | ⏳ 待开发 |
 | A6 | **语音命令识别** | ESP-Skainet 中文命令词识别, 本地离线处理 | ⏳ 待开发 |
 | A7 | **TTS 语音合成** | 文字转语音输出, 支持中文 | ⏳ 待开发 |
@@ -32,7 +32,7 @@
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
 | B1 | **SD 卡挂载** | SDIO 3.0 4-bit 模式, FAT 文件系统, boot 时挂载 | ✅ 已完成 |
-| B2 | **SD 卡文件管理** | 文件浏览/删除/信息, Web API 或 UI 操作 | ⏳ 待开发 |
+| B2 | **SD 卡文件管理** | 文件浏览/删除/信息, Web API 或 UI 操作 | ✅ 已完成 |
 | B3 | **SD 卡录音存储** | MP3/WAV 录音文件自动命名保存到 SD 卡 | ⏳ 待开发 |
 
 ### 2.3 显示功能 (可选)
@@ -85,7 +85,7 @@
 | H2 | **系统监控** | CPU/内存使用率, FreeRTOS 任务监控, 资源告警 | ✅ 已完成 |
 | H3 | **电源管理** | Deep-sleep 语音唤醒, 低功耗模式切换 | ⏳ 待开发 |
 | H4 | **uORB 消息总线** | PX4 风格 pub/sub 进程间通信 (可选) | ✅ 已完成 |
-| H5 | **ULog 日志** | 二进制日志格式, SD 卡存储 (可选) | ✅ 已完成 |
+| H5 | **ULog 日志** | 二进制日志格式, SD 卡存储, Web API 启停控制 | ✅ 已完成 |
 
 ---
 
@@ -117,3 +117,5 @@
 | 2026-07-14 | v0.6 | **Driver refactoring: esp_board_manager API pattern**. AudioDriver now uses `esp_codec_dev` (ES8389 via `es8389_codec_new`, `esp_codec_dev_new`, etc.) instead of raw I2S+I2C+register access. SDCardDriver and CameraDriver refactored to config-driven `init(cfg, cfg_size, handle)` API matching esp_board_manager device pattern (`dev_fs_fat_config_t`, `dev_camera_config_t` with DVP sub-type). Added `espressif/esp_codec_dev` component dependency. Build passes (IDF v6.1-beta1). |
 | 2026-07-14 | v0.6.1 | **Fix GPIO 41 invalid**: GPIO 41 excluded on ESP32-S31 (BIT41 in SOC_GPIO_VALID_GPIO_MASK). Changed I2C SDA from GPIO 41→39. Removed duplicate macros in app_config.h. Added thread-safety protocol to AudioDriver (_codec_mutex + _codec_ops_in_flight, from P4-Monitor pattern). |
 | 2026-07-14 | v0.7.1 | **Display + Touch 驱动适配**: 新增 DisplayDriver, 基于 BSP `bsp_display_start()` 集成 LCD (RGB 800x480) + LVGL + GT1151 Touch。`bsp_display_lock/unlock` 提供线程安全 LVGL 访问。Display 为可选外设, 未连接时优雅跳过。Build 通过。 |
+| 2026-07-14 | v0.8 | **Web Config Server 功能扩展**: 参考 esp32p4_monitor, 新增 Audio Recording API (/api/audio/record_start|stop|status, I2S RX → shine MP3 → SD), Music Playback API (/api/audio/list|play|stop, esp_audio_simple_player), File Manager API (/api/files/list|download|delete|delete_batch), ULog Control API (/api/ulog/status|start|stop)。Web UI 重构为 4 标签页 (WiFi/Audio/Files/System), 双模式 (Audio → 录音+播放, Files → 文件管理)。新增 shine_encoder 本地组件 (+extern "C" 头文件修复), esp_audio_simple_player 依赖。Build 通过。 |
+| 2026-07-14 | v0.8.1 | **Bug 修复**: (1) File Manager: 修复文件夹无法打开的问题 — JS onclick handler 区分目录(导航)和文件(切换选择) (2) Audio Recording 0-byte 文件: 修复 audio_task 使用 I2S 直接读取导致无数据 — 改为通过 AudioDriver::codec_read() (esp_codec_dev_read) 读取 BSP 管理的 I2S RX 通道, 避免 BSP 私有 I2S handle 无法获取的问题。Build 通过。 |

@@ -46,7 +46,7 @@ esp32s31_korvo1/
 │   ├── topics.h                # uORB topic 汇总 + ORB_TOPIC_DECLARE
 │   ├── main.cpp                # 主程序: NVS→SD→Audio→WiFi→WebConfig→Logger→ULog→SysMon
 │   ├── wifi_service.hpp/cpp    # WifiService — Wi-Fi STA+AP + SNTP + mDNS
-│   ├── web_config_server.hpp/cpp # Web 配置服务器 (port 8080 REST API + Web UI)
+│   ├── web_config_server.hpp/cpp # Web 配置服务器 (port 8080 REST API + 4-tab Web UI: WiFi/Audio/Files/System)
 │   ├── drivers/
 │   │   ├── audio/
 │   │   │   ├── audio_driver.hpp    # AudioDriver — ES8389 codec via esp_codec_dev (esp_board_manager API pattern)

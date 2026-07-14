@@ -7,11 +7,15 @@ extern "C" {
 /**
  * @brief Start the web config server FreeRTOS task.
  *
- * Launches an HTTP server on port 8080 with a web UI for configuring:
- *   - WiFi SSID / Password
+ * Launches an HTTP server on port 8080 with a 4-tab web UI for:
+ *   - WiFi SSID / Password / Scan
+ *   - Audio Recording (shine MP3 encoder, I2S RX → SD card)
+ *   - Music Playback (esp_audio_simple_player, SD card MP3)
+ *   - File Manager (list / download / delete / batch delete)
+ *   - ULog Control (start / stop / status)
  *   - Speaker Volume (0-100)
- *   - Timezone (GET/POST /api/system/timezone, Web UI selector)
- *   - System information (including NTP sync status and current time)
+ *   - Timezone (GET/POST /api/system/timezone)
+ *   - System information (NTP sync, current time, stats)
  *
  * Also starts a background task that:
  *   - Detects WiFi STA connection (GOT_IP) and starts SNTP time sync
