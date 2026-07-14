@@ -38,7 +38,7 @@ extern "C" {
 #define AUDIO_I2C_SCL_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2C_SCL_IO)
 #define AUDIO_I2C_SDA_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2C_SDA_IO)
 #define AUDIO_I2C_ADDR        (0x20)   /* ES8389 I2C address (8-bit, esp_codec_dev right-shifts to 7-bit 0x10) */
-#define AUDIO_I2C_FREQ        (400000) /* 400 kHz */
+#define AUDIO_I2C_FREQ        (100000) /* 100 kHz — BSP default */
 
 /* ── Audio I2S Pinout ──────────────────────────────────────────── */
 #define AUDIO_I2S_NUM         (0)

@@ -3,12 +3,13 @@
 #include <atomic>
 
 /*
- * AudioDriver — manages ES8389 audio codec via esp_codec_dev.
+ * AudioDriver — manages ES8389 audio codec via BSP (espressif/esp32_s31_korvo_1).
  *
  * Follows esp_board_manager Audio Codec device pattern:
  *   - dev_audio_codec_config_t: YAML-like configuration struct
  *   - dev_audio_codec_handles_t: device handle with codec_dev + interfaces
- *   - Uses esp_codec_dev APIs: audio_codec_new_i2s_data(), esp_codec_dev_new(), etc.
+ *   - Internally delegates to BSP: bsp_audio_codec_speaker_init(),
+ *     bsp_audio_codec_microphone_init(), bsp_audio_init()
  *   - This enables bridge to ESP-GMF pipeline elements later
  *
  * Reference-counted init/deinit, thread-safe codec operations.
@@ -17,14 +18,19 @@
  * Hardware: ES8389 stereo codec (I2S duplex + I2C control).
  *   - Dual analog mic input → ADC → I2S RX
  *   - I2S TX → DAC → NS4150B PA → Speakers
+ *   - ⚠️ MCLK (GPIO42) NOT connected → BCLK as master clock, 22kHz sample rate
+ *
+ * BSP reference: espressif/esp32_s31_korvo_1 v1.0.0~1
+ *   - bsp_audio_init() → I2S duplex (TX+RX)
+ *   - bsp_audio_codec_speaker_init() → ES8389 DAC + PA
+ *   - bsp_audio_codec_microphone_init() → ES8389 ADC
  */
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "driver/i2s_std.h"
-#include "driver/i2c_master.h"
 #include "esp_codec_dev.h"
-#include "esp_codec_dev_defaults.h"
+#include "bsp/esp32_s31_korvo_1.h"
 #include "uorb.h"
 
 /* ── esp_board_manager-compatible config structures ────────────── */
@@ -69,7 +75,7 @@ typedef struct {
     uint8_t           dac_max_channel;/*!< Max DAC channels */
     int               adc_init_gain;  /*!< ADC initial gain in dB */
     int               dac_init_gain;  /*!< DAC initial gain in dB */
-    bool              mclk_enabled;   /*!< Enable MCLK output */
+    bool              mclk_enabled;   /*!< Enable MCLK output (unused — MCLK not connected) */
     bool              aec_enabled;    /*!< Enable AEC */
     board_codec_pa_t  pa_cfg;         /*!< Power amplifier config */
     board_codec_i2c_t i2c_cfg;        /*!< I2C interface config */
@@ -79,10 +85,10 @@ typedef struct {
 /** Audio codec device handles (matches esp_board_manager dev_audio_codec_handles_t) */
 typedef struct {
     esp_codec_dev_handle_t       codec_dev;   /*!< Codec device handle */
-    const audio_codec_data_if_t *data_if;     /*!< Data interface handle */
-    const audio_codec_ctrl_if_t *ctrl_if;     /*!< Control interface handle */
-    const audio_codec_gpio_if_t *gpio_if;     /*!< GPIO interface handle */
-    const audio_codec_if_t      *codec_if;    /*!< Codec interface (ES8389) */
+    const void                  *data_if;     /*!< Data interface handle (opaque) */
+    const void                  *ctrl_if;     /*!< Control interface handle (opaque) */
+    const void                  *gpio_if;     /*!< GPIO interface handle (opaque) */
+    const void                  *codec_if;    /*!< Codec interface (ES8389, opaque) */
     i2s_chan_handle_t            tx_handle;   /*!< I2S TX channel handle */
     i2s_chan_handle_t            rx_handle;   /*!< I2S RX channel handle */
     void                        *i2c_handle;  /*!< I2C bus handle (opaque) */
@@ -97,7 +103,8 @@ public:
     /**
      * @brief  Initialize audio codec with given configuration.
      *         Follows esp_board_manager dev_audio_codec_init() signature.
-     *         Uses esp_codec_dev APIs. Reference-counted. Thread-safe.
+     *         Uses BSP for hardware init (bsp_audio_codec_speaker/microphone_init).
+     *         Reference-counted. Thread-safe.
      *
      * @param[in]  cfg      Pointer to dev_audio_codec_config_t
      * @param[in]  cfg_size Size of config struct
@@ -148,14 +155,8 @@ private:
     AudioDriver();
     ~AudioDriver();
 
-    /** Initialize I2C bus for codec control. */
-    esp_err_t _init_i2c_ctrl(const board_codec_i2c_t *i2c_cfg);
-
-    /** Initialize I2S data interface. */
-    esp_err_t _init_i2s_data(const board_codec_i2s_t *i2s_cfg, bool is_tx);
-
-    /** Initialize ES8389 codec via esp_codec_dev. */
-    esp_err_t _init_es8389_codec(const dev_audio_codec_config_t *cfg);
+    /** Initialize audio via BSP — delegates to bsp_audio_codec_speaker/microphone_init */
+    esp_err_t _init_bsp_audio(const dev_audio_codec_config_t *cfg);
 
     SemaphoreHandle_t       _lifecycle_mutex;
     std::atomic<SemaphoreHandle_t> _codec_mutex;

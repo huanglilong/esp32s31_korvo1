@@ -94,6 +94,8 @@ idf_component_register(
          "drivers/audio/audio_driver.cpp"
          "drivers/sdcard/sdcard_driver.cpp"
          "drivers/camera/camera_driver.cpp"
+         "drivers/buttons/button_driver.cpp"
+         "drivers/led/led_driver.cpp"
          "drivers/system_monitor/system_monitor.cpp"
          "logger/logger.cpp"
          "generated/wifi_state.cpp"
@@ -107,7 +109,7 @@ idf_component_register(
          "generated/system_stats.cpp"
          "generated/system_alert.cpp"
          "generated/uORBTopics.cpp"
-    INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/system_monitor" "logger"
+    INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/system_monitor" "logger"
     REQUIRES nvs_flash esp_wifi mdns cjson esp_http_server fatfs
              uorb ulog
              wifi_manager captive_dns

@@ -31,6 +31,23 @@ CONFIG_FATFS_VFS_FSTAT_BLKSIZE=4096
 # Increase VFS table size — SD card (fatfs) + more entries
 CONFIG_VFS_MAX_COUNT=16
 
+# ESP32-S31 BSP configuration (espressif/esp32_s31_korvo_1 v1.0.0~1)
+# Note: BSP uses CONFIG_BSP_ prefix for its Kconfig options
+# Audio: MCLK is NOT connected on ESP32-S31 → use 16kHz sample rate
+CONFIG_BSP_I2S_SAMPLE_RATE=22050
+CONFIG_BSP_LCD_H_RES=800
+CONFIG_BSP_LCD_V_RES=480
+# Display LVGL config
+CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=80
+CONFIG_BSP_LCD_RGB_BUFFER_NUMS=2
+CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
+# LED RGB backend (uses RMT for WS2812)
+CONFIG_BSP_LED_RGB_BACKEND_RMT=y
+# SPIFFS for internal storage
+CONFIG_BSP_SPIFFS_MOUNT_POINT="/spiffs"
+CONFIG_BSP_SPIFFS_PARTITION_LABEL="storage"
+CONFIG_BSP_SPIFFS_MAX_FILES=5
+
 # Audio I2S and I2C pins (TBD - will be updated when pin mapping is confirmed)
 CONFIG_EXAMPLE_VOICE_VOLUME=80
 CONFIG_EXAMPLE_I2C_SCL_IO=1

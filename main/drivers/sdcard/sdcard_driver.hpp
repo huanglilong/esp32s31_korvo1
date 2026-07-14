@@ -9,6 +9,7 @@
  *   - dev_fs_fat_config_t: YAML-like configuration struct
  *   - dev_fs_fat_handle_t: handle with sdmmc_card_t, host, mount_point
  *   - Sub-type driven: sdmmc (SDIO 3.0 4-bit)
+ *   - Internally delegates to BSP: bsp_sdcard_mount()
  *
  * Init-once, never deinit. SD card is mounted at boot and stays mounted.
  * Uses ESP-IDF SDMMC host driver for 4-bit SDIO 3.0 mode.

@@ -4,7 +4,7 @@
  * Follows esp_board_manager Camera device pattern:
  *   - init() takes dev_camera_config_t + returns dev_camera_handle_t*
  *   - Config-driven: DVP pins, I2C, XCLK from config struct
- *   - Hardware init uses esp_video_init() API
+ *   - Hardware init uses BSP: bsp_camera_start()
  *   - Claim/release for mutual exclusion with uORB camera_state
  *
  * Thread-safe.
@@ -13,6 +13,7 @@
 #include "camera_driver.hpp"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "bsp/esp32_s31_korvo_1.h"
 #include "topics.h"
 #include <cstring>
 #include <new>
@@ -52,7 +53,7 @@ CameraDriver::~CameraDriver() {
 }
 
 /*============================================================================
- * Init / Deinit (config-driven)
+ * Init / Deinit (config-driven, BSP-based)
  *============================================================================*/
 int CameraDriver::init(dev_camera_config_t *cfg, int cfg_size, void **handle) {
     if (!cfg || !handle) {
@@ -83,11 +84,19 @@ int CameraDriver::init(dev_camera_config_t *cfg, int cfg_size, void **handle) {
     }
     memset(cam_handle, 0, sizeof(*cam_handle));
 
+    /* Initialize camera hardware via BSP */
+    esp_err_t ret = bsp_camera_start(nullptr);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "BSP camera init failed (%s), camera may not be connected",
+                 esp_err_to_name(ret));
+        /* Continue — camera is optional, driver acts as mutual exclusion manager */
+    }
+
     /* Set default device path for DVP */
     cam_handle->dev_path = "/dev/video0";
     cam_handle->meta_path = nullptr;
 
-    ESP_LOGI(TAG, "Camera driver config loaded: "
+    ESP_LOGI(TAG, "Camera driver config loaded via BSP: "
              "sub_type=%s, xclk_freq=%" PRIu32 " Hz",
              cfg->sub_type ? cfg->sub_type : "none",
              cfg->sub_cfg.dvp.xclk_freq);

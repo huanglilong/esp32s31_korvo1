@@ -38,6 +38,8 @@
 #include "drivers/audio/audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
 #include "drivers/camera/camera_driver.hpp"
+#include "drivers/buttons/button_driver.hpp"
+#include "drivers/led/led_driver.hpp"
 #include "drivers/system_monitor/system_monitor.hpp"
 #include "logger/logger.hpp"
 #include "git_info.h"
@@ -59,7 +61,7 @@ static void _build_audio_config() {
     s_audio_cfg.dac_max_channel = 2;
     s_audio_cfg.adc_init_gain = 0;
     s_audio_cfg.dac_init_gain = 0;
-    s_audio_cfg.mclk_enabled = true;
+    s_audio_cfg.mclk_enabled = false;   /* MCLK not connected on ESP32-S31 */
     s_audio_cfg.aec_enabled = false;
 
     /* Power amplifier config */
@@ -82,7 +84,7 @@ static void _build_audio_config() {
     s_audio_cfg.i2s_cfg.ws_io = (int16_t)CONFIG_EXAMPLE_I2S_WS_IO;
     s_audio_cfg.i2s_cfg.dout_io = (int16_t)CONFIG_EXAMPLE_I2S_DOUT_IO;
     s_audio_cfg.i2s_cfg.din_io = (int16_t)CONFIG_EXAMPLE_I2S_DIN_IO;
-    s_audio_cfg.i2s_cfg.sample_rate_hz = 48000;
+    s_audio_cfg.i2s_cfg.sample_rate_hz = 22050;     /* BSP default: 22050 Hz (MCLK-less) */
     s_audio_cfg.i2s_cfg.mclk_freq_hz = 48000 * 256;
     s_audio_cfg.i2s_cfg.tx_aux_out_io = -1;
 }
@@ -362,6 +364,22 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "Camera driver initialized");
     } else {
         ESP_LOGW(TAG, "Camera driver not available");
+    }
+
+    /* 5b. Initialize button driver (via BSP) */
+    int btn_ret = ButtonDriver::instance().init();
+    if (btn_ret == 0) {
+        ESP_LOGI(TAG, "Button driver initialized (SET/MODE/VOLP/VOLM)");
+    } else {
+        ESP_LOGW(TAG, "Button driver not available");
+    }
+
+    /* 5c. Initialize LED driver (via BSP) */
+    int led_ret = LedDriver::instance().init();
+    if (led_ret == 0) {
+        ESP_LOGI(TAG, "LED driver initialized (WS2812, GPIO37)");
+    } else {
+        ESP_LOGW(TAG, "LED driver not available");
     }
 
     /* 6. Initialize WiFi service (which also initializes esp_netif) */

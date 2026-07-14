@@ -3,17 +3,16 @@
  *
  * Follows esp_board_manager FS FAT device pattern:
  *   - init() takes dev_fs_fat_config_t + returns dev_fs_fat_handle_t*
+ *   - Internally delegates to BSP: bsp_sdcard_mount() / bsp_sdcard_unmount()
  *   - Config-driven: SDMMC pins and settings from config struct
  *   - Init-once, never deinit (SD stays mounted permanently)
  */
 
 #include "sdcard_driver.hpp"
 #include "esp_log.h"
-#include "esp_check.h"
-#include "driver/gpio.h"
-#include "driver/sdmmc_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
+#include "bsp/esp32_s31_korvo_1.h"
 #include "app_config.h"
 #include <sys/stat.h>
 #include <cstring>
@@ -44,7 +43,7 @@ SDCardDriver::~SDCardDriver() {
 }
 
 /*============================================================================
- * SD Card init — SDMMC 4-bit mode (config-driven)
+ * SD Card init — delegates to BSP bsp_sdcard_mount()
  *============================================================================*/
 int SDCardDriver::init(dev_fs_fat_config_t *cfg, int cfg_size, void **handle) {
     if (!cfg || !handle) {
@@ -66,7 +65,7 @@ int SDCardDriver::init(dev_fs_fat_config_t *cfg, int cfg_size, void **handle) {
         return 0;
     }
 
-    /* Check if SD is already mounted (e.g., from previous boot) */
+    /* Check if SD is already mounted */
     {
         struct stat st;
         if (stat(cfg->mount_point, &st) == 0) {
@@ -77,7 +76,7 @@ int SDCardDriver::init(dev_fs_fat_config_t *cfg, int cfg_size, void **handle) {
         }
     }
 
-    ESP_LOGI(TAG, "Initializing SD card via SDMMC 4-bit mode...");
+    ESP_LOGI(TAG, "Initializing SD card via BSP (SDMMC 4-bit mode)...");
 
     /* Allocate handle */
     dev_fs_fat_handle_t *fs_handle = new(std::nothrow) dev_fs_fat_handle_t();
@@ -88,31 +87,8 @@ int SDCardDriver::init(dev_fs_fat_config_t *cfg, int cfg_size, void **handle) {
     }
     memset(fs_handle, 0, sizeof(*fs_handle));
 
-    /* Configure mount */
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = cfg->vfs_config.format_if_mount_failed,
-        .max_files = (int)cfg->vfs_config.max_files,
-        .allocation_unit_size = cfg->vfs_config.allocation_unit_size
-    };
-
-    /* Configure SDMMC host */
-    fs_handle->host = SDMMC_HOST_DEFAULT();
-    fs_handle->host.flags = SDMMC_HOST_FLAG_4BIT;
-    fs_handle->host.max_freq_khz = (int)(cfg->frequency / 1000);
-
-    /* Configure SDMMC slot */
-    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot_config.width = cfg->sdmmc.bus_width;
-    slot_config.clk = (gpio_num_t)cfg->sdmmc.pins.clk;
-    slot_config.cmd = (gpio_num_t)cfg->sdmmc.pins.cmd;
-    slot_config.d0 = (gpio_num_t)cfg->sdmmc.pins.d0;
-    slot_config.d1 = (gpio_num_t)cfg->sdmmc.pins.d1;
-    slot_config.d2 = (gpio_num_t)cfg->sdmmc.pins.d2;
-    slot_config.d3 = (gpio_num_t)cfg->sdmmc.pins.d3;
-    slot_config.flags |= cfg->sdmmc.slot_flags;
-
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount(cfg->mount_point, &fs_handle->host,
-            &slot_config, &mount_config, &fs_handle->card);
+    /* Mount SD card via BSP */
+    esp_err_t ret = bsp_sdcard_mount();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "SD card mount failed (%s), continuing without SD", esp_err_to_name(ret));
         delete fs_handle;
@@ -120,14 +96,17 @@ int SDCardDriver::init(dev_fs_fat_config_t *cfg, int cfg_size, void **handle) {
         return -1;
     }
 
-    /* Store mount point (borrowed from config, caller must keep it alive) */
+    /* Get SD card handle from BSP */
+    fs_handle->card = bsp_sdcard_get_handle();
     fs_handle->mount_point = (char *)cfg->mount_point;
 
     _handles.store(fs_handle, std::memory_order_release);
     _initialized.store(true, std::memory_order_relaxed);
 
     ESP_LOGI(TAG, "SD card mounted at %s", cfg->mount_point);
-    sdmmc_card_print_info(stdout, fs_handle->card);
+    if (fs_handle->card) {
+        sdmmc_card_print_info(stdout, fs_handle->card);
+    }
 
     if (handle) *handle = fs_handle;
     xSemaphoreGive(_init_mutex);

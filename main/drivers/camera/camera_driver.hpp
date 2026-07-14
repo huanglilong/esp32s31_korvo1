@@ -21,7 +21,7 @@
  *   Re-claiming with the same caller_id succeeds (reentrant).
  *   Claiming with a different caller_id fails (mutual exclusion).
  *
- * Hardware init uses esp_video_init() API (same as esp_board_manager dev_camera_sub_dvp).
+ * Hardware init uses BSP bsp_camera_start() API.
  */
 
 #include "freertos/FreeRTOS.h"

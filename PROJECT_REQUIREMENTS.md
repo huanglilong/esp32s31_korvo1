@@ -47,8 +47,8 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| D1 | **按键驱动** | PLAY/SET/VOL-/VOL+ 四按键 GPIO 输入, 消抖, 长短按识别 | ⏳ 待开发 |
-| D2 | **RGB LED 指示** | GPIO8 WS2812, 状态指示 (WiFi 连接/录音/唤醒/待机 不同颜色) | ⏳ 待开发 |
+| D1 | **按键驱动** | PLAY/SET/VOL-/VOL+ 四按键 ADC 输入, 消抖, 长短按识别。通过 BSP `bsp_iot_button_create()` 初始化 | ✅ 已完成 |
+| D2 | **RGB LED 指示** | GPIO37 WS2812, 状态指示 (WiFi 连接/录音/唤醒/待机 不同颜色)。通过 BSP `bsp_led_indicator_create()` 初始化 | ✅ 已完成 |
 | D3 | **按键控制逻辑** | PLAY: 播放/暂停, SET: 模式切换, VOL±: 音量调节 | ⏳ 待开发 |
 
 ### 2.5 摄像头功能 (可选)
@@ -116,4 +116,4 @@
 | 2026-07-14 | v0.5.1 | ULog 延迟启动: ULog 不再在 boot 时立即 start, 改为 SNTP 时间同步完成后由 web_config_task 自动 start (参考 esp32p4_monitor 实现)。确保 ULog 文件获得正确的 wall-clock 时间戳和日期命名。main.cpp 只做 init + add_topic, 不调用 ulog_writer_start()。 |
 | 2026-07-14 | v0.6 | **Driver refactoring: esp_board_manager API pattern**. AudioDriver now uses `esp_codec_dev` (ES8389 via `es8389_codec_new`, `esp_codec_dev_new`, etc.) instead of raw I2S+I2C+register access. SDCardDriver and CameraDriver refactored to config-driven `init(cfg, cfg_size, handle)` API matching esp_board_manager device pattern (`dev_fs_fat_config_t`, `dev_camera_config_t` with DVP sub-type). Added `espressif/esp_codec_dev` component dependency. Build passes (IDF v6.1-beta1). |
 | 2026-07-14 | v0.6.1 | **Fix GPIO 41 invalid**: GPIO 41 excluded on ESP32-S31 (BIT41 in SOC_GPIO_VALID_GPIO_MASK). Changed I2C SDA from GPIO 41→39. Removed duplicate macros in app_config.h. Added thread-safety protocol to AudioDriver (_codec_mutex + _codec_ops_in_flight, from P4-Monitor pattern). |
-| 2026-07-14 | v0.6.3 | **更新官方 BSP 参考**: 添加 [espressif/esp32_s31_korvo_1](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1) v1.0.0~1 官方板级支持包信息到所有项目文档。重要发现: **MCLK 引脚 (GPIO42) 在 ESP32-S31 上未连接**，推荐音频采样率 16kHz。更新 README/PROJECT/硬件文档以反映此硬件限制和 BSP 依赖关系。 |
+| 2026-07-14 | v0.7 | **BSP 外设适配**: 基于 [espressif/esp32_s31_korvo_1](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1) v1.0.0~1 完成所有核心外设驱动适配。Audio 驱动改用 `bsp_audio_codec_speaker/microphone_init()` (MCLK-less, 22kHz)；SD 卡驱动改用 `bsp_sdcard_mount()`；Camera 驱动改用 `bsp_camera_start()`；新增 Button 驱动 (4-button ADC array via `bsp_iot_button_create()`)；新增 LED 驱动 (WS2812 via `bsp_led_indicator_create()`)；更新 `idf_component.yml` 添加 BSP 依赖。Build 通过 (ESP-IDF v6.2)。 |
