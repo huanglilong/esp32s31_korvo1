@@ -86,9 +86,11 @@
 
 ```bash
 source ~/.espressif/v6.x/esp-idf/export.sh            # Setup environment (required for both build and test)
-idf.py set-target esp32s31                             # Set target chip
+idf.py set-target esp32s31                            # Set target chip
 idf.py build                                          # Build
 idf.py flash monitor                                  # Flash firmware & monitor serial output
+# In another terminal (same source), once device connects to WiFi:
+pytest tests --base-url=http://esp-web.local:8080 -v  # Run tests (requires device + WiFi)
 idf.py fullclean                                      # Full clean (only when config changed)
 ```
 
@@ -117,7 +119,7 @@ After code changes, rebuild. If `sdkconfig.defaults` changed, `fullclean` first.
 2. **git push is forbidden** — never push without explicit request
 3. **One issue, one commit** — each commit addresses exactly ONE issue/feature/bugfix
 4. **Commit messages**: clear, concise, in English, with **root cause and summary of what was done and why**
-5. **Before committing**: verify build passes (`idf.py build`)
+5. **Before committing**: verify build passes (`idf.py build`), and flash/monitor works (`idf.py flash monitor`) and all tests pass (`pytest tests --base-url=http://esp-web.local:8080 -v`)
 
 ---
 

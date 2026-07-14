@@ -81,6 +81,14 @@ esp32s31_korvo1/
 │   └── system_stats.msg, system_alert.msg
 ├── tools/
 │   └── msg_gen.py            # .msg → C++ 代码生成器
+├── tests/                    # pytest 集成测试 (Web Config Server REST API)
+│   ├── conftest.py           # 共享 fixtures (base_url, client, api helper)
+│   ├── requirements.txt      # pytest + requests 依赖
+│   ├── test_wifi.py          # WiFi scan/connect/status 测试
+│   ├── test_audio.py         # Audio volume/record/play/list 测试
+│   ├── test_files.py         # File manager list/download/delete 测试
+│   ├── test_ulog.py          # ULog status/start/stop 测试
+│   └── test_system.py        # System info/stats/timezone/sdcard 测试
 ├── managed_components/       # ⚠️ ESP-IDF 管理 (禁止编辑)
 ├── doc/                      # 项目文档
 ├── README.md                 # 硬件信息 + 构建说明

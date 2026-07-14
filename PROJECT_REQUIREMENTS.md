@@ -100,6 +100,7 @@
 | S5 | **WiFi/BT 共存** | Wi-Fi 和 Bluetooth 共享天线, RF 共存策略 | ⏳ 待开发 |
 | S6 | **内存管理** | PSRAM 合理分配, 避免内存碎片, OOM 保护 | ⏳ 待开发 |
 | S7 | **跨核线程安全** | `std::atomic<T>` 保护跨 HP/LP 核共享变量 | ⏳ 待开发 |
+| S8 | **Web API 自动化测试** | pytest 集成测试, 覆盖 WiFi/Audio/Files/ULog/System 全部 REST API 端点 | ✅ 已完成 |
 
 ---
 
@@ -120,3 +121,4 @@
 | 2026-07-14 | v0.8 | **Web Config Server 功能扩展**: 参考 esp32p4_monitor, 新增 Audio Recording API (/api/audio/record_start|stop|status, I2S RX → shine MP3 → SD), Music Playback API (/api/audio/list|play|stop, esp_audio_simple_player), File Manager API (/api/files/list|download|delete|delete_batch), ULog Control API (/api/ulog/status|start|stop)。Web UI 重构为 4 标签页 (WiFi/Audio/Files/System), 双模式 (Audio → 录音+播放, Files → 文件管理)。新增 shine_encoder 本地组件 (+extern "C" 头文件修复), esp_audio_simple_player 依赖。Build 通过。 |
 | 2026-07-14 | v0.8.1 | **Bug 修复**: (1) File Manager: 修复文件夹无法打开的问题 — JS onclick handler 区分目录(导航)和文件(切换选择) (2) Audio Recording 0-byte 文件: 修复 audio_task 使用 I2S 直接读取导致无数据 — 改为通过 AudioDriver::codec_read() (esp_codec_dev_read) 读取 BSP 管理的 I2S RX 通道, 避免 BSP 私有 I2S handle 无法获取的问题。Build 通过。 |
 | 2026-07-15 | v0.9 | **Web UI 交互优化**: (1) WiFi: 自动低频 Scan (10s), Select→Connect 绿色按钮, 密码弹窗 (Enter 提交, 过滤功能键), 移除 Scan 按钮和 WiFi Connect 子页面 (2) Audio: Record+▶/■ 同一行, Recording/Stopped 状态+文件路径+大小分行显示, Music Player 自动刷新 (5s), ▶/■ 图标按钮 (3) Files: 删除/下载更新状态栏 (4) System: System Info 自动刷新 (5s), Volume 实时滑块+NVS 防抖 (?save=false), ULog Record+▶/■ 同一行, Running→Recording, 状态+文件路径+大小分行显示, 自动刷新 (3s) (5) 默认按钮蓝色, 状态文字蓝色, Start/Stop 用 ▶/■ 图标。record_status API 新增 file 字段。Build 通过。 |
+| 2026-07-15 | v0.9.1 | **pytest 集成测试**: 参考 esp32p4_monitor/tests/ 方案, 新增 tests/ 目录, 覆盖 Web Config Server 全部 REST API 端点。conftest.py 提供 base_url/client/api fixture (--base-url CLI / ESP_BASE_URL env / mDNS 默认), device_info 自动打印设备信息。test_wifi.py (scan/connect/status), test_audio.py (volume/record/play/list/stop), test_files.py (list/download/delete/delete_batch + path traversal 防护), test_ulog.py (status/start/stop lifecycle), test_system.py (info/stats/timezone/sdcard)。 |
