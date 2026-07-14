@@ -84,20 +84,26 @@
 
 ## 4. Build, Flash & Monitor
 
+### 4.1 Quick Commands
+
 ```bash
-source ~/.espressif/v6.x/esp-idf/export.sh            # Setup environment (required for both build and test)
-idf.py set-target esp32s31                            # Set target chip
+source ~/.espressif/v6.x/esp-idf/export.sh            # Setup environment (once per shell)
+idf.py set-target esp32s31                            # Set target chip (once)
 idf.py build                                          # Build
-idf.py flash monitor                                  # Flash firmware & monitor serial output
+idf.py flash monitor                                  # Flash + monitor serial output
+idf.py fullclean                                      # Full clean (only when config changed)
 # In another terminal (same source), once device connects to WiFi:
 pytest tests --base-url=http://esp-web.local:8080 -v  # Run tests (requires device + WiFi)
-idf.py fullclean                                      # Full clean (only when config changed)
 ```
 
 **Linux**: `idf.py flash -b 1500000 -p $(bash -c "ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1") monitor`
 **macOS**: `idf.py flash -b 1500000 -p $(bash -c "ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null | head -1") monitor`
 
 After code changes, rebuild. If `sdkconfig.defaults` changed, `fullclean` first.
+
+### 4.2 Debug Workflow (no TTY)
+
+When `idf.py monitor` is unavailable, use the step-by-step build → flash → serial capture → log analysis workflow in [esp32_debug_workflow.md](.github/esp32_debug_workflow.md).
 
 ---
 
