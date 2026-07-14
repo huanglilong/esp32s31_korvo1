@@ -39,9 +39,9 @@
 
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
-| C1 | **LCD 显示** | ESP32-S3-LCD-EV-Board-SUB3 4.3" 子板驱动, LVGL UI | ⏳ 待开发 |
+| C1 | **LCD 显示** | ESP32-S3-LCD-EV-Board-SUB3 4.3" 子板驱动, LVGL UI。通过 BSP `bsp_display_start()` 初始化 | ✅ 已完成 |
 | C2 | **HMI 图形界面** | ESP-Brookesia Phone UI 桌面 + 自定义 App (音乐播放器/设置/录音) | ⏳ 待开发 |
-| C3 | **触屏交互** | LCD 子板触屏支持, LVGL 触控事件 | ⏳ 待开发 |
+| C3 | **触屏交互** | LCD 子板 GT1151 触屏支持, LVGL 触控事件。通过 BSP `bsp_display_start()` 自动初始化 | ✅ 已完成 |
 
 ### 2.4 按键与 LED
 
@@ -116,4 +116,4 @@
 | 2026-07-14 | v0.5.1 | ULog 延迟启动: ULog 不再在 boot 时立即 start, 改为 SNTP 时间同步完成后由 web_config_task 自动 start (参考 esp32p4_monitor 实现)。确保 ULog 文件获得正确的 wall-clock 时间戳和日期命名。main.cpp 只做 init + add_topic, 不调用 ulog_writer_start()。 |
 | 2026-07-14 | v0.6 | **Driver refactoring: esp_board_manager API pattern**. AudioDriver now uses `esp_codec_dev` (ES8389 via `es8389_codec_new`, `esp_codec_dev_new`, etc.) instead of raw I2S+I2C+register access. SDCardDriver and CameraDriver refactored to config-driven `init(cfg, cfg_size, handle)` API matching esp_board_manager device pattern (`dev_fs_fat_config_t`, `dev_camera_config_t` with DVP sub-type). Added `espressif/esp_codec_dev` component dependency. Build passes (IDF v6.1-beta1). |
 | 2026-07-14 | v0.6.1 | **Fix GPIO 41 invalid**: GPIO 41 excluded on ESP32-S31 (BIT41 in SOC_GPIO_VALID_GPIO_MASK). Changed I2C SDA from GPIO 41→39. Removed duplicate macros in app_config.h. Added thread-safety protocol to AudioDriver (_codec_mutex + _codec_ops_in_flight, from P4-Monitor pattern). |
-| 2026-07-14 | v0.7 | **BSP 外设适配**: 基于 [espressif/esp32_s31_korvo_1](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1) v1.0.0~1 完成所有核心外设驱动适配。Audio 驱动改用 `bsp_audio_codec_speaker/microphone_init()` (MCLK-less, 22kHz)；SD 卡驱动改用 `bsp_sdcard_mount()`；Camera 驱动改用 `bsp_camera_start()`；新增 Button 驱动 (4-button ADC array via `bsp_iot_button_create()`)；新增 LED 驱动 (WS2812 via `bsp_led_indicator_create()`)；更新 `idf_component.yml` 添加 BSP 依赖。Build 通过 (ESP-IDF v6.2)。 |
+| 2026-07-14 | v0.7.1 | **Display + Touch 驱动适配**: 新增 DisplayDriver, 基于 BSP `bsp_display_start()` 集成 LCD (RGB 800x480) + LVGL + GT1151 Touch。`bsp_display_lock/unlock` 提供线程安全 LVGL 访问。Display 为可选外设, 未连接时优雅跳过。Build 通过。 |

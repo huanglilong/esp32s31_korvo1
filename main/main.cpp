@@ -40,6 +40,7 @@
 #include "drivers/camera/camera_driver.hpp"
 #include "drivers/buttons/button_driver.hpp"
 #include "drivers/led/led_driver.hpp"
+#include "drivers/display/display_driver.hpp"
 #include "drivers/system_monitor/system_monitor.hpp"
 #include "logger/logger.hpp"
 #include "git_info.h"
@@ -380,6 +381,16 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "LED driver initialized (WS2812, GPIO37)");
     } else {
         ESP_LOGW(TAG, "LED driver not available");
+    }
+
+    /* 5d. Initialize display driver (via BSP, optional) */
+    int display_ret = DisplayDriver::instance().init();
+    if (display_ret == 0) {
+        ESP_LOGI(TAG, "Display driver initialized (%dx%d)",
+                 DisplayDriver::instance().width(),
+                 DisplayDriver::instance().height());
+    } else {
+        ESP_LOGW(TAG, "Display driver not available (LCD subboard not connected?)");
     }
 
     /* 6. Initialize WiFi service (which also initializes esp_netif) */

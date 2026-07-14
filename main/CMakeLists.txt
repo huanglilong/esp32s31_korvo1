@@ -96,6 +96,7 @@ idf_component_register(
          "drivers/camera/camera_driver.cpp"
          "drivers/buttons/button_driver.cpp"
          "drivers/led/led_driver.cpp"
+         "drivers/display/display_driver.cpp"
          "drivers/system_monitor/system_monitor.cpp"
          "logger/logger.cpp"
          "generated/wifi_state.cpp"
@@ -109,11 +110,11 @@ idf_component_register(
          "generated/system_stats.cpp"
          "generated/system_alert.cpp"
          "generated/uORBTopics.cpp"
-    INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/system_monitor" "logger"
+    INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/display" "drivers/system_monitor" "logger"
     REQUIRES nvs_flash esp_wifi mdns cjson esp_http_server fatfs
              uorb ulog
              wifi_manager captive_dns
-    PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash
+    PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash esp_lcd_touch
 )
 
 target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
