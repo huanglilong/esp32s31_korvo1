@@ -78,7 +78,44 @@ int DisplayDriver::init() {
 #endif
 
     _initialized.store(true, std::memory_order_relaxed);
+
+    /* Create a simple splash screen to verify display works */
+    if (_disp) {
+        DisplayDriver::lock(1000);
+        lv_obj_t *scr = lv_display_get_screen_active(_disp);
+        if (scr) {
+            lv_obj_set_style_bg_color(scr, lv_color_hex(0x1a1a2e), LV_PART_MAIN);
+
+            lv_obj_t *label = lv_label_create(scr);
+            lv_label_set_text(label, "ESP32-S31\nKorvo-1");
+            lv_obj_set_style_text_color(label, lv_color_hex(0x00d4aa), LV_PART_MAIN);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN);
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+            lv_obj_center(label);
+
+            /* Status subtitle */
+            lv_obj_t *status = lv_label_create(scr);
+            lv_label_set_text(status, "Boot OK — WiFi AP Mode");
+            lv_obj_set_style_text_color(status, lv_color_hex(0x888888), LV_PART_MAIN);
+            lv_obj_set_style_text_font(status, &lv_font_montserrat_14, LV_PART_MAIN);
+            lv_obj_align(status, LV_ALIGN_BOTTOM_MID, 0, -20);
+
+            /* IP address */
+            lv_obj_t *ip = lv_label_create(scr);
+            lv_label_set_text(ip, "http://192.168.4.1:8080");
+            lv_obj_set_style_text_color(ip, lv_color_hex(0x5555ff), LV_PART_MAIN);
+            lv_obj_set_style_text_font(ip, &lv_font_montserrat_14, LV_PART_MAIN);
+            lv_obj_align(ip, LV_ALIGN_BOTTOM_MID, 0, -5);
+
+            /* Force a render now */
+            lv_refr_now(_disp);
+        }
+        DisplayDriver::unlock();
+    }
+
     xSemaphoreGive(_mutex);
+    ESP_LOGI(TAG, "Display initialized: %dx%d (RGB565, LVGL)", _width, _height);
+    return 0;
     ESP_LOGI(TAG, "Display initialized: %dx%d (RGB565, LVGL)", _width, _height);
     return 0;
 }
