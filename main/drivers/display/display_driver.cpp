@@ -116,8 +116,6 @@ int DisplayDriver::init() {
     xSemaphoreGive(_mutex);
     ESP_LOGI(TAG, "Display initialized: %dx%d (RGB565, LVGL)", _width, _height);
     return 0;
-    ESP_LOGI(TAG, "Display initialized: %dx%d (RGB565, LVGL)", _width, _height);
-    return 0;
 }
 
 void DisplayDriver::deinit() {
