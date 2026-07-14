@@ -66,7 +66,7 @@ static void _build_audio_config() {
     s_audio_cfg.aec_enabled = false;
 
     /* Power amplifier config */
-    s_audio_cfg.pa_cfg.port = 43;         /* GPIO43 controls NS4150B PA (CTRL pin) */
+    s_audio_cfg.pa_cfg.port = BSP_POWER_AMP_IO;  /* GPIO7 (BSP), NOT GPIO43 (LCD DE!) */
     s_audio_cfg.pa_cfg.gain = 0.0f;
     s_audio_cfg.pa_cfg.active_level = 1;  /* Active high */
 

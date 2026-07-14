@@ -29,7 +29,7 @@
   |   I2S_LRCK	|   GPIO4	|   ↔	|   LRCK/WS   |
   |   I2S_SDOUT	|   GPIO6	|   ←	|   ADC data  |
   |   I2S_DSDIN	|   GPIO5	|   →	|   DAC data  |
-  |   PA_CTRL	|   GPIO43   |   → NS4150B |   功放使能 (高电平有效)  |
+  |   PA_CTRL	|   GPIO7    |   → NS4150B |   功放使能 (高电平有效)  |
   |   PA_L	    |   NS4150B |   ← ES8389  |   左声道功放  |
   |   PA_R	    |   NS4150B |   ← ES8389  |   右声道功放  |
 

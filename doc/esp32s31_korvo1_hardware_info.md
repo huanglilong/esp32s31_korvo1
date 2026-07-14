@@ -168,7 +168,7 @@
 | ES8389 I2S LRCK | I2S | **GPIO4** | 左右声道时钟 |
 | ES8389 I2S DSDIN | I2S | **GPIO5** | DAC 数据输入 |
 | ES8389 I2S SDOUT | I2S | **GPIO6** | ADC 数据输出 |
-| NS4150B PA CTRL | GPIO | **GPIO43** | 功放使能 (高电平有效) |
+| NS4150B PA CTRL | GPIO | **GPIO7** | 功放使能 (高电平有效, GPIO43 为 LCD DE) |
 | microSD CLK | SDIO 3.0 | **GPIO24** | SD 时钟 |
 | microSD CMD | SDIO 3.0 | **GPIO25** | SD 命令 |
 | microSD D0 | SDIO 3.0 | **GPIO20** | SD 数据0 |

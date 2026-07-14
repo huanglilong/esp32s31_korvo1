@@ -104,7 +104,7 @@ esp32s31_korvo1/
 | I2S_LRCK | ↔ | GPIO4 | 左右声道时钟 (WS) |
 | I2S_SDOUT | ← ES8389 | GPIO6 | ADC 数据 (麦克风) |
 | I2S_DSDIN | ESP32-S31 → | GPIO5 | DAC 数据 (扬声器) |
-| PA_CTRL | ESP32-S31 → NS4150B | GPIO43 | 功放使能 |
+| PA_CTRL | ESP32-S31 → NS4150B | GPIO7 | 功放使能 |
 | MIC_L/R | → ES8389 analog in | — | 模拟麦克风输入 |
 | PA_L/R | ← ES8389 → NS4150B | — | 功放输入 → 扬声器 |
 
