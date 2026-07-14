@@ -67,11 +67,15 @@ int LedDriver::init() {
 
     _initialized.store(true, std::memory_order_relaxed);
 
-    /* Start with LED off */
-    turn_off();
+    /* Turn LED off — call internal function to avoid deadlock on mutex */
+    _state.store(false, std::memory_order_relaxed);
+    if (_led) {
+        led_indicator_start(_led, BSP_LED_OFF);
+    }
 
     xSemaphoreGive(_mutex);
     ESP_LOGI(TAG, "RGB LED initialized (WS2812, GPIO37)");
+    fflush(stdout);
     return 0;
 }
 

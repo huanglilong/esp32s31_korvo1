@@ -383,16 +383,6 @@ extern "C" void app_main(void) {
         ESP_LOGW(TAG, "LED driver not available");
     }
 
-    /* 5d. Initialize display driver (via BSP, optional) */
-    int display_ret = DisplayDriver::instance().init();
-    if (display_ret == 0) {
-        ESP_LOGI(TAG, "Display driver initialized (%dx%d)",
-                 DisplayDriver::instance().width(),
-                 DisplayDriver::instance().height());
-    } else {
-        ESP_LOGW(TAG, "Display driver not available (LCD subboard not connected?)");
-    }
-
     /* 6. Initialize WiFi service (which also initializes esp_netif) */
     ret = WifiService::instance().init();
     if (ret != ESP_OK) {
@@ -438,6 +428,18 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "System monitor started");
     } else {
         ESP_LOGW(TAG, "System monitor init failed");
+    }
+
+    /* 11. Initialize display driver (via BSP, optional, AFTER system is live) */
+    ESP_LOGI(TAG, "Initializing display...");
+    fflush(stdout);
+    int display_ret = DisplayDriver::instance().init();
+    if (display_ret == 0) {
+        ESP_LOGI(TAG, "Display driver initialized (%dx%d)",
+                 DisplayDriver::instance().width(),
+                 DisplayDriver::instance().height());
+    } else {
+        ESP_LOGW(TAG, "Display driver not available (LCD subboard not connected?)");
     }
 
     ESP_LOGI(TAG, "Boot complete. Web config: http://esp-web-XXXXXX.local:8080");
