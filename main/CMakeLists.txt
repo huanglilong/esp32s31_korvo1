@@ -116,7 +116,7 @@ idf_component_register(
     REQUIRES nvs_flash esp_wifi mdns cjson esp_http_server fatfs
              uorb ulog shine_encoder esp_audio_simple_player
              wifi_manager captive_dns esp_video
-    PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash esp_lcd_touch
+    PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash esp_lcd_touch esp_driver_ppa
 )
 
 target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

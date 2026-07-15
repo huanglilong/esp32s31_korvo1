@@ -129,6 +129,10 @@ private:
     lv_obj_t             *_canvas;
     lv_color_format_t     _lvgl_format;  /* LVGL color format matching camera output */
 
+    /* PPA hardware acceleration */
+    void                 *_ppa_client;   /* ppa_client_handle_t for SRM operations */
+    uint8_t              *_ppa_out_buf;  /* PPA output buffer (800x480 RGB565, SPIRAM) */
+
     /* Canvas buffers (SPIRAM) — one per V4L2 buffer for double-buffering */
     uint8_t              *_canvas_bufs[CAMERA_APP_NUM_V4L2_BUFS];
 
