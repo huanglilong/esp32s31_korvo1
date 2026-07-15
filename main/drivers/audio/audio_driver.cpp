@@ -65,7 +65,7 @@ esp_err_t AudioDriver::_init_bsp_audio(const dev_audio_codec_config_t *cfg) {
     esp_codec_dev_handle_t speaker_dev = nullptr;
     esp_codec_dev_handle_t mic_dev = nullptr;
 
-    /* Initialize speaker (DAC) via BSP */
+    /* Initialize speaker (DAC) via BSP — same as BSP display_audio_photo example */
     if (cfg->dac_enabled) {
         speaker_dev = bsp_audio_codec_speaker_init();
         if (!speaker_dev) {
@@ -73,9 +73,20 @@ esp_err_t AudioDriver::_init_bsp_audio(const dev_audio_codec_config_t *cfg) {
             return ESP_FAIL;
         }
         ESP_LOGI(TAG, "BSP speaker initialized (ES8389 DAC + PA)");
+
+        esp_codec_dev_sample_info_t spk_fs = {
+            .bits_per_sample = 16,
+            .channel = cfg->dac_max_channel,
+            .sample_rate = cfg->i2s_cfg.sample_rate_hz,
+        };
+        if (esp_codec_dev_open(speaker_dev, &spk_fs) != ESP_CODEC_DEV_OK) {
+            ESP_LOGW(TAG, "Speaker open returned non-OK");
+        }
+        ESP_LOGI(TAG, "Speaker codec device opened (sample_rate=%lu, channels=%d)",
+                 (unsigned long)spk_fs.sample_rate, spk_fs.channel);
     }
 
-    /* Initialize microphone (ADC) via BSP */
+    /* Initialize microphone (ADC) via BSP — same as BSP display_audio_photo example */
     if (cfg->adc_enabled) {
         mic_dev = bsp_audio_codec_microphone_init();
         if (!mic_dev) {
@@ -87,10 +98,21 @@ esp_err_t AudioDriver::_init_bsp_audio(const dev_audio_codec_config_t *cfg) {
             return ESP_FAIL;
         }
         ESP_LOGI(TAG, "BSP microphone initialized (ES8389 ADC)");
+
+        esp_codec_dev_sample_info_t fs = {
+            .bits_per_sample = 16,
+            .channel = cfg->adc_max_channel,
+            .sample_rate = cfg->i2s_cfg.sample_rate_hz,
+        };
+        if (esp_codec_dev_open(mic_dev, &fs) != ESP_CODEC_DEV_OK) {
+            ESP_LOGW(TAG, "Mic open returned non-OK");
+        }
+        ESP_LOGI(TAG, "Microphone codec device opened (sample_rate=%lu, channels=%d)",
+                 (unsigned long)fs.sample_rate, fs.channel);
     }
 
-    /* Store the primary codec_dev handle (speaker if DAC enabled, else mic) */
     h->codec_dev = speaker_dev ? speaker_dev : mic_dev;
+    h->mic_dev = mic_dev;
 
     return ESP_OK;
 }
@@ -174,6 +196,11 @@ cleanup:
             esp_codec_dev_delete(h_cleanup->codec_dev);
             h_cleanup->codec_dev = nullptr;
         }
+        if (h_cleanup->mic_dev) {
+            esp_codec_dev_close(h_cleanup->mic_dev);
+            esp_codec_dev_delete(h_cleanup->mic_dev);
+            h_cleanup->mic_dev = nullptr;
+        }
         delete h_cleanup;
         _handles.store(nullptr, std::memory_order_release);
     }
@@ -215,6 +242,11 @@ void AudioDriver::deinit() {
             esp_codec_dev_close(h->codec_dev);
             esp_codec_dev_delete(h->codec_dev);
             h->codec_dev = nullptr;
+        }
+        if (h->mic_dev) {
+            esp_codec_dev_close(h->mic_dev);
+            esp_codec_dev_delete(h->mic_dev);
+            h->mic_dev = nullptr;
         }
         delete h;
         _handles.store(nullptr, std::memory_order_release);
@@ -293,8 +325,8 @@ void AudioDriver::set_mic_gain(int gain_db) {
     xSemaphoreTake(mtx, portMAX_DELAY);
 
     dev_audio_codec_handles_t *h = _handles.load(std::memory_order_acquire);
-    if (h && h->codec_dev) {
-        esp_codec_dev_set_in_gain(h->codec_dev, (float)gain_db);
+    if (h && h->mic_dev) {
+        esp_codec_dev_set_in_gain(h->mic_dev, (float)gain_db);
     }
 
     xSemaphoreGive(mtx);
@@ -319,7 +351,10 @@ int AudioDriver::codec_write(const uint8_t *data, int size) {
     dev_audio_codec_handles_t *h = _handles.load(std::memory_order_acquire);
     int ret = -1;
     if (h && h->codec_dev) {
-        ret = esp_codec_dev_write(h->codec_dev, (void*)data, size);
+        int status = esp_codec_dev_write(h->codec_dev, (void*)data, size);
+        /* esp_codec_dev_write returns ESP_CODEC_DEV_OK (0) on success,
+         * NOT the byte count. */
+        ret = (status == ESP_CODEC_DEV_OK) ? size : -1;
     }
 
     xSemaphoreGive(mtx);
@@ -343,8 +378,15 @@ int AudioDriver::codec_read(uint8_t *data, int size) {
 
     dev_audio_codec_handles_t *h = _handles.load(std::memory_order_acquire);
     int ret = -1;
-    if (h && h->codec_dev) {
-        ret = esp_codec_dev_read(h->codec_dev, data, size);
+    if (h) {
+        /* Use mic_dev for recording (ADC input), fall back to codec_dev */
+        esp_codec_dev_handle_t dev = h->mic_dev ? h->mic_dev : h->codec_dev;
+        if (dev) {
+            int status = esp_codec_dev_read(dev, data, size);
+            /* esp_codec_dev_read returns ESP_CODEC_DEV_OK (0) on success,
+             * NOT the byte count. The full `size` bytes are filled. */
+            ret = (status == ESP_CODEC_DEV_OK) ? size : -1;
+        }
     }
 
     xSemaphoreGive(mtx);

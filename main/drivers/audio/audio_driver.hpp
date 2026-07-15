@@ -84,7 +84,8 @@ typedef struct {
 
 /** Audio codec device handles (matches esp_board_manager dev_audio_codec_handles_t) */
 typedef struct {
-    esp_codec_dev_handle_t       codec_dev;   /*!< Codec device handle */
+    esp_codec_dev_handle_t       codec_dev;   /*!< Codec device handle (speaker/DAC for playback) */
+    esp_codec_dev_handle_t       mic_dev;     /*!< Microphone codec device handle (ADC for recording) */
     const void                  *data_if;     /*!< Data interface handle (opaque) */
     const void                  *ctrl_if;     /*!< Control interface handle (opaque) */
     const void                  *gpio_if;     /*!< GPIO interface handle (opaque) */

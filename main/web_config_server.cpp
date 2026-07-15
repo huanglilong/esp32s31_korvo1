@@ -68,8 +68,8 @@ static httpd_handle_t s_httpd = nullptr;
 
 #define REC_BUF_SAMPLES      480
 #define REC_BUF_BYTES        (REC_BUF_SAMPLES * 2 * sizeof(int16_t))
-#define ENC_SAMPLES_PER_CH   1152
-#define PCM_BUF_SAMPLES      (ENC_SAMPLES_PER_CH * 2)
+#define PCM_BUF_MAX_SAMPLES  (1152 * 2)  /* Max PCM buffer: 1152 samples/ch × 2 ch = 2304 int16_t */
+/* samples_per_ch is determined dynamically from shine_encoder once initialized */
 
 static std::atomic<TaskHandle_t> s_audio_task{nullptr};
 static StackType_t   *s_audio_stack = NULL;
@@ -78,6 +78,7 @@ static std::atomic<bool>  s_audio_running{false};
 static std::atomic<bool>  s_is_recording{false};
 static shine_t        s_shine = NULL;
 static int16_t       *s_pcm_buf = NULL;
+static int            s_enc_spc = 0;       /* Samples per channel for encoder (dynamically set) */
 static std::atomic<int>  s_pcm_count{0};
 static FILE          *s_rec_file = NULL;
 static std::atomic<uint32_t> s_rec_bytes{0};
@@ -129,12 +130,14 @@ static void audio_task(void *arg)
         int n = AudioDriver::instance().codec_read((uint8_t*)buf, REC_BUF_BYTES);
         if (n <= 0) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
         int32_t spc = n / (2 * sizeof(int16_t));
+
         if (s_is_recording && s_pcm_buf && s_shine) {
+            int enc_spc = s_enc_spc;  /* Local copy: 576 @ 16000 Hz (MPEG-II) */
             for (int32_t i = 0; i < spc; i++) {
                 int idx = s_pcm_count.load(std::memory_order_relaxed);
                 s_pcm_buf[idx * 2]     = buf[i * 2];
                 s_pcm_buf[idx * 2 + 1] = buf[i * 2 + 1];
-                if (s_pcm_count.fetch_add(1, std::memory_order_relaxed) + 1 >= ENC_SAMPLES_PER_CH) {
+                if (s_pcm_count.fetch_add(1, std::memory_order_relaxed) + 1 >= enc_spc) {
                     int wr = 0;
                     unsigned char *mp3 = shine_encode_buffer_interleaved(s_shine, s_pcm_buf, &wr);
                     if (mp3 && wr > 0 && s_rec_file) s_rec_bytes.fetch_add(fwrite(mp3, 1, wr, s_rec_file), std::memory_order_relaxed);
@@ -1213,13 +1216,22 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
         s_audio_task.store(h, std::memory_order_release);
         if (!h) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
     }
-    s_pcm_buf = (int16_t*)heap_caps_calloc(1, PCM_BUF_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_pcm_buf = (int16_t*)heap_caps_calloc(1, PCM_BUF_MAX_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_pcm_buf) { audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
     s_pcm_count.store(0, std::memory_order_relaxed);
     shine_config_t c; shine_set_config_mpeg_defaults(&c.mpeg);
-    c.wave.channels = PCM_STEREO; c.wave.samplerate = 48000; c.mpeg.mode = STEREO; c.mpeg.bitr = 128;
+    c.wave.channels = PCM_STEREO; c.wave.samplerate = 16000; c.mpeg.mode = STEREO; c.mpeg.bitr = 128;
     s_shine = shine_initialise(&c);
     if (!s_shine) { heap_caps_free(s_pcm_buf); s_pcm_buf = NULL; audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+    s_enc_spc = shine_samples_per_pass(s_shine);  /* 576 for 16000 Hz MPEG-II */
+    if (s_enc_spc <= 0 || s_enc_spc > 1152) {
+        ESP_LOGE(TAG, "Invalid encoder samples per channel: %d", s_enc_spc);
+        shine_close(s_shine); s_shine = NULL;
+        heap_caps_free(s_pcm_buf); s_pcm_buf = NULL;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
+    }
+    /* Set microphone PGA gain (ES8389 max hardware gain is 36.5 dB, BSP example uses 50 dB) */
+    AudioDriver::instance().set_mic_gain(40);
     struct timeval tv; gettimeofday(&tv, NULL);
     time_t t = tv.tv_sec; struct tm tm_buf;
     localtime_r(&t, &tm_buf);
