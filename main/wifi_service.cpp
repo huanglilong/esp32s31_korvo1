@@ -368,26 +368,37 @@ esp_err_t WifiService::connect(const char *ssid, const char *password) {
     _save_nvs_creds(ssid, password);
     strlcpy(_current_ssid, ssid, sizeof(_current_ssid));
 
-    /* Use wifi_manager_apply_sta_config to hot-swap credentials */
+    /* Use wifi_manager_apply_sta_config to hot-swap credentials.
+     * Keep AP running so the web UI remains reachable during connection.
+     * Preserve AP SSID prefix so the AP name doesn't change. */
     wifi_manager_config_t cfg = {};
     cfg.sta_ssid = ssid;
     cfg.sta_password = (password && strlen(password) > 0) ? password : nullptr;
+    cfg.ap_behavior = "keep";
+    cfg.ap_ssid_prefix = "esp-s31";
+
+    /* Pre-validate to give a clear error message */
+    esp_err_t val_err = wifi_manager_validate_config(&cfg);
+    if (val_err != ESP_OK) {
+        ESP_LOGW(TAG, "validate_config failed: %s — ssid='%s'(%u) pass_len=%u ap_prefix='%s'(%u) ap_behavior='%s'",
+                 esp_err_to_name(val_err),
+                 ssid, (unsigned)strlen(ssid),
+                 (unsigned)(password ? strlen(password) : 0),
+                 cfg.ap_ssid_prefix ? cfg.ap_ssid_prefix : "(null)",
+                 (unsigned)(cfg.ap_ssid_prefix ? strlen(cfg.ap_ssid_prefix) : 0),
+                 cfg.ap_behavior ? cfg.ap_behavior : "(null)");
+        return val_err;
+    }
 
     esp_err_t err = wifi_manager_apply_sta_config(&cfg);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "apply_sta_config failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "apply_sta_config failed: %s (ssid='%s', pass_len=%u)",
+                 esp_err_to_name(err), ssid, (unsigned)(password ? strlen(password) : 0));
         return err;
     }
 
-    /* Wait for connection (blocking, caller runs in a task) */
-    err = wifi_manager_wait_connected(15000);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Connected to %s", ssid);
-    } else {
-        ESP_LOGW(TAG, "Connect to %s timed out (credentials saved, will retry on boot)", ssid);
-    }
-
-    return err;
+    ESP_LOGI(TAG, "STA config applied for %s, connection in progress", ssid);
+    return ESP_OK;
 }
 
 esp_err_t WifiService::disconnect() {

@@ -76,6 +76,7 @@ static void *s_state_cb_user_ctx;
 static esp_timer_handle_t s_reconnect_timer;
 static wifi_manager_config_t s_config;
 static bool s_wifi_started;
+static bool s_scanning;
 
 static void notify_state_changed(bool force);
 static esp_err_t configure_sta_mode(const wifi_manager_config_t *config);
@@ -217,20 +218,48 @@ static void reset_sta_runtime_state(void)
 esp_err_t wifi_manager_validate_config(const wifi_manager_config_t *config)
 {
     if (!config) return ESP_ERR_INVALID_ARG;
+    ESP_LOGI(TAG, "validate: sta_ssid='%s' sta_pass_len=%u ap_prefix='%s'(%u) ap_ssid='%s' ap_pass_len=%u ap_behavior='%s' ch=%u max_conn=%u",
+             config->sta_ssid ? config->sta_ssid : "(null)",
+             (unsigned)(config->sta_password ? strlen(config->sta_password) : 0),
+             config->ap_ssid_prefix ? config->ap_ssid_prefix : "(null)",
+             (unsigned)(config->ap_ssid_prefix ? strlen(config->ap_ssid_prefix) : 0),
+             config->ap_ssid ? config->ap_ssid : "(null)",
+             (unsigned)(config->ap_password ? strlen(config->ap_password) : 0),
+             config->ap_behavior ? config->ap_behavior : "(null)",
+             (unsigned)config->ap_channel,
+             (unsigned)config->ap_max_conn);
     if (config->sta_ssid && config->sta_ssid[0] != '\0') {
-        if (strlen(config->sta_ssid) >= sizeof(((wifi_config_t *)0)->sta.ssid)) return ESP_ERR_INVALID_ARG;
+        if (strlen(config->sta_ssid) >= sizeof(((wifi_config_t *)0)->sta.ssid)) {
+            ESP_LOGW(TAG, "validate: STA SSID too long (%u)", (unsigned)strlen(config->sta_ssid));
+            return ESP_ERR_INVALID_ARG;
+        }
     }
     if (config->sta_password && config->sta_password[0] != '\0') {
         size_t n = strlen(config->sta_password);
-        if (n < 8 || n >= sizeof(((wifi_config_t *)0)->sta.password)) return ESP_ERR_INVALID_ARG;
+        if (n < 8 || n >= sizeof(((wifi_config_t *)0)->sta.password)) {
+            ESP_LOGW(TAG, "validate: STA password length %u invalid (need 8-%u)", (unsigned)n, (unsigned)sizeof(((wifi_config_t *)0)->sta.password) - 1);
+            return ESP_ERR_INVALID_ARG;
+        }
     }
     if (config->ap_password && config->ap_password[0] != '\0') {
         size_t n = strlen(config->ap_password);
-        if (n < 8 || n >= sizeof(((wifi_config_t *)0)->ap.password)) return ESP_ERR_INVALID_ARG;
+        if (n < 8 || n >= sizeof(((wifi_config_t *)0)->ap.password)) {
+            ESP_LOGW(TAG, "validate: AP password length %u invalid", (unsigned)n);
+            return ESP_ERR_INVALID_ARG;
+        }
     }
-    if (config->ap_ssid && strlen(config->ap_ssid) > sizeof(((wifi_config_t *)0)->ap.ssid)) return ESP_ERR_INVALID_ARG;
-    if (config->ap_ssid_prefix && strlen(config->ap_ssid_prefix) >= sizeof(s_ap_ssid) - 7) return ESP_ERR_INVALID_ARG;
-    if (!wifi_manager_ap_behavior_is_valid(config->ap_behavior)) return ESP_ERR_INVALID_ARG;
+    if (config->ap_ssid && strlen(config->ap_ssid) > sizeof(((wifi_config_t *)0)->ap.ssid)) {
+        ESP_LOGW(TAG, "validate: AP SSID too long");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (config->ap_ssid_prefix && strlen(config->ap_ssid_prefix) >= sizeof(s_ap_ssid) - 7) {
+        ESP_LOGW(TAG, "validate: AP SSID prefix too long (%u)", (unsigned)strlen(config->ap_ssid_prefix));
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!wifi_manager_ap_behavior_is_valid(config->ap_behavior)) {
+        ESP_LOGW(TAG, "validate: invalid ap_behavior '%s'", config->ap_behavior ? config->ap_behavior : "(null)");
+        return ESP_ERR_INVALID_ARG;
+    }
     return ESP_OK;
 }
 
@@ -271,8 +300,13 @@ static esp_err_t configure_sta_mode(const wifi_manager_config_t *config)
         return ESP_OK;
     }
 
-    s_mode = WM_STATE_PROVISION_AP;
-    err = esp_wifi_set_mode(WIFI_MODE_AP);
+    /* Use APSTA mode even when STA is not configured.
+     * This avoids mode switching during WiFi scans (scan requires STA
+     * interface), which disrupts the AP and kills HTTP connections from
+     * connected clients (e.g., web config UI). The STA interface stays
+     * idle — esp_wifi_connect() is only called when s_sta_configured. */
+    s_mode = WM_STATE_APSTA;
+    err = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (err != ESP_OK) return err;
     apply_ap_config();
     return ESP_OK;
@@ -313,14 +347,16 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
         case WIFI_EVENT_STA_START:
-            if (s_sta_configured) {
+            if (s_scanning) {
+                ESP_LOGD(TAG, "STA start during scan, skipping connect");
+            } else if (s_sta_configured) {
                 ESP_LOGI(TAG, "STA start: ssid_len=%u auth_threshold=%s mode=%s",
                          (unsigned)strlen(s_config.sta_ssid),
                          wifi_manager_sta_password_is_set() ? "wpa2_psk" : "open",
                          wifi_manager_mode_string(s_mode));
                 esp_wifi_connect();
             } else {
-                ESP_LOGW(TAG, "Wi-Fi STA not configured, skipping connection");
+                ESP_LOGD(TAG, "Wi-Fi STA not configured, skipping connection");
             }
             return;
 
@@ -339,8 +375,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 s_connected = false;
                 notify_state_changed(false);
             }
+            if (s_scanning) {
+                ESP_LOGD(TAG, "STA disconnect during scan (reason=%u)", (unsigned)reason);
+                return;
+            }
             if (!s_sta_configured) {
-                ESP_LOGW(TAG, "STA disconnected but not configured, reason=%u", (unsigned)reason);
+                ESP_LOGD(TAG, "STA disconnected but not configured, reason=%u", (unsigned)reason);
                 return;
             }
             reopen_ap_if_needed();
@@ -535,8 +575,6 @@ esp_netif_t *wifi_manager_get_ap_netif(void)
 
 esp_err_t wifi_manager_scan_aps(wifi_manager_scan_record_t *records, uint16_t max_records, uint16_t *out_count)
 {
-    wifi_mode_t original_mode = WIFI_MODE_NULL;
-    wifi_mode_t scan_mode = WIFI_MODE_NULL;
     wifi_scan_config_t scan_cfg = { .show_hidden = true };
     wifi_ap_record_t *ap_records = NULL;
     uint16_t ap_count = 0;
@@ -545,19 +583,19 @@ esp_err_t wifi_manager_scan_aps(wifi_manager_scan_record_t *records, uint16_t ma
     if (!records || max_records == 0 || !out_count) return ESP_ERR_INVALID_ARG;
     *out_count = 0;
 
-    err = esp_wifi_get_mode(&original_mode);
+    /* WiFi scan requires STA interface. Since we now always use APSTA mode,
+     * no mode switching is needed — STA interface is always available. */
+    wifi_mode_t cur_mode;
+    err = esp_wifi_get_mode(&cur_mode);
     if (err != ESP_OK) return err;
-
-    scan_mode = original_mode;
-    if (original_mode == WIFI_MODE_AP) {
-        scan_mode = WIFI_MODE_APSTA;
-        err = esp_wifi_set_mode(scan_mode);
-        if (err != ESP_OK) return err;
-    } else if (original_mode != WIFI_MODE_STA && original_mode != WIFI_MODE_APSTA) {
+    if (cur_mode != WIFI_MODE_STA && cur_mode != WIFI_MODE_APSTA) {
+        ESP_LOGE(TAG, "Cannot scan: WiFi mode is %d (need STA or APSTA)", cur_mode);
         return ESP_ERR_INVALID_STATE;
     }
 
+    s_scanning = true;
     err = esp_wifi_scan_start(&scan_cfg, true);
+    s_scanning = false;
     if (err != ESP_OK) goto cleanup;
 
     err = esp_wifi_scan_get_ap_num(&ap_count);
@@ -583,9 +621,5 @@ esp_err_t wifi_manager_scan_aps(wifi_manager_scan_record_t *records, uint16_t ma
 
 cleanup:
     free(ap_records);
-    if (scan_mode != original_mode) {
-        esp_err_t restore_err = esp_wifi_set_mode(original_mode);
-        if (err == ESP_OK && restore_err != ESP_OK) err = restore_err;
-    }
     return err;
 }

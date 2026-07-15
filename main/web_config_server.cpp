@@ -535,12 +535,31 @@ function closeWifiModal() {
 }
 async function connectFromModal() {
   let pass=document.getElementById('modal-password').value;
+  let connectSsid=_modalSsid;  /* Save SSID before closeWifiModal() clears it */
   closeWifiModal();
-  document.getElementById('wifi-status').textContent='Connecting to '+_modalSsid+'...';
-  let d=await apiPost('/api/wifi/connect',{ssid:_modalSsid,password:pass});
-  if(d.error) document.getElementById('wifi-status').innerHTML='<span class="error">'+d.error+'</span>';
-  else document.getElementById('wifi-status').innerHTML='<span style="color:#2ecc71">Connected: '+d.ssid+' ('+d.ip+')</span>';
-  scanWiFi();
+  document.getElementById('wifi-status').textContent='Connecting to '+connectSsid+'...';
+  let d=await apiPost('/api/wifi/connect',{ssid:connectSsid,password:pass});
+  if(d.error) {
+    document.getElementById('wifi-status').innerHTML='<span class="error">'+d.error+'</span>';
+    return;
+  }
+  /* Non-blocking: server returns {status:"connecting"} immediately.
+   * Poll /api/wifi/status until connected or timeout (20s). */
+  let attempts=0;
+  let pollId=setInterval(async function(){
+    let st=await apiGet('/api/wifi/status');
+    if(st.error) return; /* Skip failed fetches, don't count as attempt */
+    attempts++;
+    if(st.connected) {
+      clearInterval(pollId);
+      document.getElementById('wifi-status').innerHTML='<span style="color:#2ecc71">Connected: '+st.ssid+' ('+st.ip+')</span>';
+      scanWiFi();
+    } else if(attempts>=40) {
+      clearInterval(pollId);
+      document.getElementById('wifi-status').innerHTML='<span class="error">Connection timed out</span>';
+      scanWiFi();
+    }
+  },500);
 }
 
 /* ── Volume (real-time slider with NVS debounce) ── */
@@ -799,36 +818,71 @@ static esp_err_t _api_wifi_scan(httpd_req_t *req) {
 
 /* POST /api/wifi/connect */
 static esp_err_t _api_wifi_connect(httpd_req_t *req) {
-    char buf[256];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty body");
+    /* Read full body with Content-Length awareness.
+     * httpd_req_recv may return partial data, so loop until done. */
+    size_t content_len = req->content_len;
+    if (content_len == 0 || content_len > 512) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid body length");
         return ESP_FAIL;
     }
-    buf[ret] = '\0';
+
+    char *buf = (char *)calloc(1, content_len + 1);
+    if (!buf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    int total_received = 0;
+    while (total_received < content_len) {
+        int ret = httpd_req_recv(req, buf + total_received, content_len - total_received);
+        if (ret <= 0) {
+            free(buf);
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "Recv timeout");
+            }
+            return ESP_FAIL;
+        }
+        total_received += ret;
+    }
+    buf[total_received] = '\0';
 
     cJSON *root = cJSON_Parse(buf);
+    free(buf);
+
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
     cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
     cJSON *pass_item = cJSON_GetObjectItem(root, "password");
 
     const char *ssid = ssid_item ? ssid_item->valuestring : nullptr;
     const char *pass = pass_item ? pass_item->valuestring : nullptr;
 
+    ESP_LOGW(TAG, "WiFi connect request: ssid='%s' pass_len=%u",
+             ssid ? ssid : "(null)", (unsigned)(pass ? strlen(pass) : 0));
+
     cJSON *resp = cJSON_CreateObject();
     if (!ssid) {
         cJSON_AddStringToObject(resp, "error", "Missing SSID");
+    } else if (strlen(ssid) >= 32) {
+        cJSON_AddStringToObject(resp, "error", "SSID too long (max 31 chars)");
+    } else if (pass && strlen(pass) > 0 && strlen(pass) < 8) {
+        cJSON_AddStringToObject(resp, "error", "Password must be at least 8 characters");
     } else {
+        /* Non-blocking: apply STA config and return immediately.
+         * Client should poll GET /api/wifi/status to check connection.
+         * This avoids blocking the httpd task and prevents AP disruption
+         * from killing the HTTP connection mid-response. */
         esp_err_t err = WifiService::instance().connect(ssid, pass);
         if (err == ESP_OK) {
-            wifi_service_status_t st;
-            WifiService::instance().get_status(&st);
+            cJSON_AddStringToObject(resp, "status", "connecting");
             cJSON_AddStringToObject(resp, "ssid", ssid);
-            cJSON_AddStringToObject(resp, "ip", st.sta_ip);
-            cJSON_AddBoolToObject(resp, "connected", true);
-        } else if (err == ESP_ERR_TIMEOUT) {
-            cJSON_AddStringToObject(resp, "error", "Connection timed out");
         } else {
-            cJSON_AddStringToObject(resp, "error", "Connection failed");
+            char err_msg[64];
+            snprintf(err_msg, sizeof(err_msg), "Failed to apply config: %s", esp_err_to_name(err));
+            cJSON_AddStringToObject(resp, "error", err_msg);
         }
     }
 
@@ -1537,6 +1591,9 @@ static esp_err_t _api_ulog_stop(httpd_req_t *req) {
 /* GET / — serve index HTML */
 static esp_err_t _index_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+    httpd_resp_set_hdr(req, "Expires", "0");
     httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
