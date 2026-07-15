@@ -89,15 +89,17 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/git_info.h
 
 idf_component_register(
     SRCS "wifi_service.cpp" "main.cpp"
-        
+         
          "web_config_server.cpp"
          "drivers/audio/audio_driver.cpp"
          "drivers/sdcard/sdcard_driver.cpp"
          "drivers/camera/camera_driver.cpp"
+         "drivers/camera/camera_app.cpp"
          "drivers/buttons/button_driver.cpp"
          "drivers/led/led_driver.cpp"
          "drivers/display/display_driver.cpp"
          "drivers/system_monitor/system_monitor.cpp"
+         "app_video.c"
          "logger/logger.cpp"
          "generated/wifi_state.cpp"
          "generated/volume_state.cpp"
@@ -113,7 +115,7 @@ idf_component_register(
     INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/display" "drivers/system_monitor" "logger"
     REQUIRES nvs_flash esp_wifi mdns cjson esp_http_server fatfs
              uorb ulog shine_encoder esp_audio_simple_player
-             wifi_manager captive_dns
+             wifi_manager captive_dns esp_video
     PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash esp_lcd_touch
 )
 

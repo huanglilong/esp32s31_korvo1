@@ -56,8 +56,9 @@
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
 | E1 | **DVP 摄像头驱动** | OV3660 初始化, DVP 并行接口图像采集 | ✅ 已完成 (driver only) |
-| E2 | **JPEG 编码** | 硬件 JPEG Codec, 图像压缩存储 | ⏳ 待开发 |
-| E3 | **人脸检测** | 可选 ESP-DL 人脸检测模型 | ⏳ 待开发 |
+| E2 | **Camera App (LCD 预览)** | Camera 图像实时在 LCD 上显示 (V4L2 + LVGL canvas) | ✅ 已完成 |
+| E3 | **JPEG 编码** | 硬件 JPEG Codec, 图像压缩存储 | ⏳ 待开发 |
+| E4 | **人脸检测** | 可选 ESP-DL 人脸检测模型 | ⏳ 待开发 |
 
 ### 2.6 网络功能
 
@@ -122,3 +123,4 @@
 | 2026-07-14 | v0.8.1 | **Bug 修复**: (1) File Manager: 修复文件夹无法打开的问题 — JS onclick handler 区分目录(导航)和文件(切换选择) (2) Audio Recording 0-byte 文件: 修复 audio_task 使用 I2S 直接读取导致无数据 — 改为通过 AudioDriver::codec_read() (esp_codec_dev_read) 读取 BSP 管理的 I2S RX 通道, 避免 BSP 私有 I2S handle 无法获取的问题。Build 通过。 |
 | 2026-07-15 | v0.9 | **Web UI 交互优化**: (1) WiFi: 自动低频 Scan (10s), Select→Connect 绿色按钮, 密码弹窗 (Enter 提交, 过滤功能键), 移除 Scan 按钮和 WiFi Connect 子页面 (2) Audio: Record+▶/■ 同一行, Recording/Stopped 状态+文件路径+大小分行显示, Music Player 自动刷新 (5s), ▶/■ 图标按钮 (3) Files: 删除/下载更新状态栏 (4) System: System Info 自动刷新 (5s), Volume 实时滑块+NVS 防抖 (?save=false), ULog Record+▶/■ 同一行, Running→Recording, 状态+文件路径+大小分行显示, 自动刷新 (3s) (5) 默认按钮蓝色, 状态文字蓝色, Start/Stop 用 ▶/■ 图标。record_status API 新增 file 字段。Build 通过。 |
 | 2026-07-15 | v0.9.1 | **pytest 集成测试**: 参考 esp32p4_monitor/tests/ 方案, 新增 tests/ 目录, 覆盖 Web Config Server 全部 REST API 端点。conftest.py 提供 base_url/client/api fixture (--base-url CLI / ESP_BASE_URL env / mDNS 默认), device_info 自动打印设备信息。test_wifi.py (scan/connect/status), test_audio.py (volume/record/play/list/stop), test_files.py (list/download/delete/delete_batch + path traversal 防护), test_ulog.py (status/start/stop lifecycle), test_system.py (info/stats/timezone/sdcard)。 |
+| 2026-07-15 | v0.10.1 | **Camera App 修复**: OV3660 传感器检测问题修复。根本原因: `CONFIG_CAMERA_OV3660=y` 及 `CONFIG_CAMERA_OV3660_AUTO_DETECT_DVP_INTERFACE_SENSOR=y` 需在 sdkconfig.defaults 中显式设置, 否则 esp_cam_sensor 组件不会编译 OV3660 驱动, `__esp_cam_sensor_detect_fn_array` 为空, esp_video_init 传感器检测失败但返回 ESP_OK, 导致 /dev/video2 设备节点未创建。相机现在正常工作: 640x480 RGB565, ~11 fps, 稳定运行无内存泄漏 (heap 11552 KB)。 |

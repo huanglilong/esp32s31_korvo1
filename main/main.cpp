@@ -38,6 +38,7 @@
 #include "drivers/audio/audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
 #include "drivers/camera/camera_driver.hpp"
+#include "drivers/camera/camera_app.hpp"
 #include "drivers/buttons/button_driver.hpp"
 #include "drivers/led/led_driver.hpp"
 #include "drivers/display/display_driver.hpp"
@@ -440,6 +441,30 @@ extern "C" void app_main(void) {
                  DisplayDriver::instance().height());
     } else {
         ESP_LOGW(TAG, "Display driver not available (LCD subboard not connected?)");
+    }
+
+    /* 12. Initialize Camera App (camera streaming to LCD, optional) */
+    if (display_ret == 0 && cam_ret == 0) {
+        ESP_LOGI(TAG, "Initializing Camera App...");
+        int cam_app_ret = CameraApp::instance().init();
+        if (cam_app_ret == 0) {
+            /* Claim camera hardware */
+            if (CameraDriver::instance().claim("CameraApp")) {
+                int start_ret = CameraApp::instance().start();
+                if (start_ret == 0) {
+                    ESP_LOGI(TAG, "Camera App streaming (%" PRIu32 "x%" PRIu32 ")",
+                             CameraApp::instance().frameWidth(),
+                             CameraApp::instance().frameHeight());
+                } else {
+                    ESP_LOGW(TAG, "Camera App start failed");
+                    CameraDriver::instance().release("CameraApp");
+                }
+            } else {
+                ESP_LOGW(TAG, "Camera hardware claimed by another module, skipping preview");
+            }
+        } else {
+            ESP_LOGW(TAG, "Camera App init failed (no camera connected?)");
+        }
     }
 
     ESP_LOGI(TAG, "Boot complete. Web config: http://esp-web-XXXXXX.local:8080");

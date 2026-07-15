@@ -47,6 +47,7 @@ esp32s31_korvo1/
 │   ├── main.cpp                # 主程序: NVS→SD→Audio→WiFi→WebConfig→Logger→ULog→SysMon
 │   ├── wifi_service.hpp/cpp    # WifiService — Wi-Fi STA+AP + SNTP + mDNS
 │   ├── web_config_server.hpp/cpp # Web 配置服务器 (port 8080 REST API + 4-tab Web UI: WiFi/Audio/Files/System)
+│   ├── app_video.h / app_video.c  # V4L2 camera helper (from BSP display_camera_video example)
 │   ├── drivers/
 │   │   ├── audio/
 │   │   │   ├── audio_driver.hpp    # AudioDriver — ES8389 codec via esp_codec_dev (esp_board_manager API pattern)
@@ -56,7 +57,9 @@ esp32s31_korvo1/
 │   │   │   └── sdcard_driver.cpp
 │   │   ├── camera/
 │   │   │   ├── camera_driver.hpp   # CameraDriver — OV3660 DVP 摄像头
-│   │   │   └── camera_driver.cpp
+│   │   │   ├── camera_driver.cpp
+│   │   │   ├── camera_app.hpp      # CameraApp — 摄像头 LCD 预览 (V4L2 + LVGL canvas)
+│   │   │   └── camera_app.cpp
 │   │   └── system_monitor/
 │   │       ├── system_monitor.hpp  # SystemMonitor — CPU/内存采样 + uORB
 │   │       └── system_monitor.cpp

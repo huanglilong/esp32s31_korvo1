@@ -122,7 +122,7 @@
   - > ⚠️ MCLK 不可用，推荐采样率 **16kHz**
 - **Audio Driver**: ES8389 立体声编解码器驱动, 使用 `esp_codec_dev` API, I2S 16kHz 16-bit 双工 (MCLK-less), 硬件音量控制, uORB 音量状态发布
 - **SD Card**: SDIO 3.0 4-bit 模式, FATFS 文件系统, boot 时自动挂载
-- **Camera**: DVP OV3660 摄像头驱动 (optional, mutex 互斥控制)
+- **Camera**: DVP OV3660 摄像头驱动 (optional, mutex 互斥控制), Camera App LCD 实时预览 (V4L2 + LVGL canvas)
 - **WiFi**: 内置 Wi-Fi 6 STA + SoftAP 模式, NVS 凭证持久化, SNTP 时间同步
 - **mDNS**: esp-web-XXXXXX.local 主机名, Web Config 服务广告
 - **Web Config Server**: HTTP port 8080, WiFi 扫描/连接 REST API, 音量控制, 系统信息

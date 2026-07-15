@@ -244,7 +244,7 @@ dependencies:
       - if: target in [esp32p4, esp32s3, esp32s31]
       version: 2.5.*
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32p4
@@ -528,9 +528,10 @@ direct_dependencies:
 - espressif/esp32_s31_korvo_1
 - espressif/esp_audio_simple_player
 - espressif/esp_codec_dev
+- espressif/esp_video
 - espressif/mdns
 - idf
 - protocol_examples_common
-manifest_hash: 750b5b8203d7c91d69fd68db96bd166534f0f3af19317cd563eb037b4a3c9eeb
+manifest_hash: 8169a6b9bc1aa92df557779ac4cfbe288487bf431fdb8f652ad6f15e630e5da0
 target: esp32s31
 version: 3.0.0
