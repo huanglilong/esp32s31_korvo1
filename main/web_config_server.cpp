@@ -1685,7 +1685,20 @@ static esp_err_t _api_files_download(httpd_req_t *req) {
 
     fseek(f, 0, SEEK_END); long fsize = ftell(f); fseek(f, 0, SEEK_SET);
     const char *fname = strrchr(fpath, '/'); fname = fname ? fname + 1 : fpath;
-    char disp[384]; snprintf(disp, sizeof(disp), "attachment; filename=\"%s\"", fname);
+    /* Sanitize filename for Content-Disposition header — strip quotes and CR/LF
+     * to prevent HTTP header injection via malicious filenames on the SD card. */
+    char safe_fname[256];
+    {
+        const char *src = fname;
+        char *dst = safe_fname;
+        char *end = safe_fname + sizeof(safe_fname) - 1;
+        while (*src && dst < end) {
+            if (*src == '"' || *src == '\r' || *src == '\n') { src++; continue; }
+            *dst++ = *src++;
+        }
+        *dst = '\0';
+    }
+    char disp[384]; snprintf(disp, sizeof(disp), "attachment; filename=\"%s\"", safe_fname);
     httpd_resp_set_hdr(req, "Content-Disposition", disp);
     httpd_resp_set_type(req, "application/octet-stream");
     if (fsize > 0) { char clen[32]; snprintf(clen, sizeof(clen), "%ld", fsize); httpd_resp_set_hdr(req, "Content-Length", clen); }
