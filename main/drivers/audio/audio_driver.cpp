@@ -171,6 +171,11 @@ int AudioDriver::init(dev_audio_codec_config_t *cfg, int cfg_size, void **handle
     /* Set initial volume */
     set_volume(_volume.load(std::memory_order_relaxed));
 
+    /* Set initial mic gain */
+    if (cfg->adc_enabled && cfg->adc_init_gain > 0) {
+        set_mic_gain(cfg->adc_init_gain);
+    }
+
     /* Restore volume from NVS */
     {
         nvs_handle_t nvs_h;
