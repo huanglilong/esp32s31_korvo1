@@ -258,12 +258,22 @@ static SemaphoreHandle_t s_timezone_mutex = nullptr;  /* Protects s_timezone r/w
 
 /* ── Timezone helpers ──────────────────────────────────────────────── */
 
+/* Atomic mutex to prevent race on first creation */
+static std::atomic<SemaphoreHandle_t> s_tz_mutex_atomic{nullptr};
+
 static void _load_timezone_from_nvs(void)
 {
-    /* Create mutex on first call */
-    if (!s_timezone_mutex) {
-        s_timezone_mutex = xSemaphoreCreateMutex();
+    /* Create mutex on first call — CAS prevents double-creation race */
+    if (!s_tz_mutex_atomic.load(std::memory_order_acquire)) {
+        SemaphoreHandle_t new_mtx = xSemaphoreCreateMutex();
+        SemaphoreHandle_t expected = nullptr;
+        if (!s_tz_mutex_atomic.compare_exchange_strong(expected, new_mtx,
+                std::memory_order_release, std::memory_order_acquire)) {
+            /* Another thread beat us — free our duplicate */
+            vSemaphoreDelete(new_mtx);
+        }
     }
+    s_timezone_mutex = s_tz_mutex_atomic.load(std::memory_order_acquire);
 
     if (s_timezone_loaded.load(std::memory_order_acquire)) return;
 
