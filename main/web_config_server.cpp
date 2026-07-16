@@ -1399,14 +1399,16 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
         esp_audio_simple_player_destroy(old);
         audio_lock();
     }
+    /* Snapshot s_rec_path before unlock — concurrent rec_stop could overwrite it */
+    char rec_path_snap[128]; strlcpy(rec_path_snap, s_rec_path, sizeof(rec_path_snap));
     audio_unlock();
-    ESP_LOGI(TAG, "Recording: %s", s_rec_path);
+    ESP_LOGI(TAG, "Recording: %s", rec_path_snap);
     /* Return status so client can update UI immediately without a second round-trip */
     cJSON *root = cJSON_CreateObject();
     if (root) {
         cJSON_AddBoolToObject(root, "ok", true);
         cJSON_AddBoolToObject(root, "recording", true);
-        cJSON_AddStringToObject(root, "file", s_rec_path);
+        cJSON_AddStringToObject(root, "file", rec_path_snap);
         char *j = cJSON_PrintUnformatted(root);
         if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
         else httpd_resp_sendstr(req, "{\"ok\":1,\"recording\":true}");
