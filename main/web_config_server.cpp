@@ -842,6 +842,8 @@ static esp_err_t _api_wifi_connect(httpd_req_t *req) {
             free(buf);
             if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
                 httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "Recv timeout");
+            } else {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Recv error");
             }
             return ESP_FAIL;
         }
@@ -894,7 +896,7 @@ static esp_err_t _api_wifi_connect(httpd_req_t *req) {
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
     cJSON_free(json_str);
     cJSON_Delete(resp);
-    if (root) cJSON_Delete(root);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -1132,6 +1134,10 @@ static esp_err_t _api_audio_volume_set(httpd_req_t *req) {
     }
 
     cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
     cJSON *vol_item = cJSON_GetObjectItem(root, "volume");
 
     cJSON *resp = cJSON_CreateObject();
@@ -1162,7 +1168,7 @@ static esp_err_t _api_audio_volume_set(httpd_req_t *req) {
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
     cJSON_free(json_str);
     cJSON_Delete(resp);
-    if (root) cJSON_Delete(root);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -1212,6 +1218,14 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
         s_audio_running = true;
         s_audio_stack = (StackType_t *)heap_caps_malloc(12 * 1024 * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!s_audio_stack) { s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
+        if (!s_audio_tcb) {
+            ESP_LOGE(TAG, "Audio TCB not allocated — audio task cannot start");
+            heap_caps_free(s_audio_stack); s_audio_stack = NULL;
+            s_audio_running = false;
+            audio_unlock();
+            httpd_resp_sendstr(req, "{\"ok\":0}");
+            return ESP_OK;
+        }
         TaskHandle_t h = xTaskCreateStaticPinnedToCore(audio_task, "w_audio", 12 * 1024, NULL, 1, s_audio_stack, s_audio_tcb, 1);
         s_audio_task.store(h, std::memory_order_release);
         if (!h) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
