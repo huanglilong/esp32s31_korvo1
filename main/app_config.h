@@ -29,8 +29,10 @@ extern "C" {
 #define WIFI_CONNECTED_BIT            BIT0
 
 /* ── Audio I2S ──────────────────────────────────────────────────── */
-#define EXAMPLE_AUDIO_SAMPLE_RATE     (48000)
-#define EXAMPLE_AUDIO_MCLK_FREQ_HZ    (EXAMPLE_AUDIO_SAMPLE_RATE * 256)
+/* NOTE: Actual sample rate is 16kHz (MCLK-less mode on ESP32-S31).
+ * These macros are kept for backward compatibility but unused. */
+#define EXAMPLE_AUDIO_SAMPLE_RATE     (16000)
+#define EXAMPLE_AUDIO_MCLK_FREQ_HZ    (0)  /* MCLK not connected on ESP32-S31 */
 #define EXAMPLE_VOICE_VOLUME          CONFIG_EXAMPLE_VOICE_VOLUME
 
 /* ── Audio I2C ──────────────────────────────────────────────────── */
