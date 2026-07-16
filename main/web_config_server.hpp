@@ -17,6 +17,10 @@ extern "C" {
  *   - Timezone (GET/POST /api/system/timezone)
  *   - System information (auto-refresh 5s, NTP sync, current time, stats)
  *
+ * Command APIs return full status in response for immediate UI update.
+ * Client uses optimistic UI updates: button state changes instantly on click,
+ * then syncs from command response. No second round-trip needed.
+ *
  * Also starts a background task that:
  *   - Detects WiFi STA connection (GOT_IP) and starts SNTP time sync
  *   - Auto-starts ULog logging after SNTP time is synced

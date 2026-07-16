@@ -602,8 +602,7 @@ function onVolumeSlide(v) {
 /* ── Audio Recording ── */
 var s_recording=false;
 var _recTimer=null;
-async function refreshRecStatus() {
-  let d=await apiGet('/api/audio/record_status');
+function applyRecStatus(d) {
   let wasRecording=s_recording;
   s_recording=!!d.recording;
   if(s_recording) {
@@ -625,26 +624,33 @@ async function refreshRecStatus() {
     }
   }
 }
+async function refreshRecStatus() {
+  let d=await apiGet('/api/audio/record_status');
+  applyRecStatus(d);
+}
 async function recToggle() {
   if(s_recording) {
+    /* Optimistic: show Stopped immediately */
+    applyRecStatus({recording:0});
     let d=await apiGet('/api/audio/record_stop');
-    refreshRecStatus();
+    if(d.ok) applyRecStatus(d); /* Sync from command response (has file/bytes) */
+    else refreshRecStatus(); /* Revert on error */
   } else {
+    /* Optimistic: show Recording immediately */
+    applyRecStatus({recording:1,seconds:0});
     let d=await apiGet('/api/audio/record_start');
-    if(!d.ok){ document.getElementById('rec-status').innerHTML='<span class="error">'+(d.error||'Failed')+'</span>'; return; }
-    refreshRecStatus();
+    if(d.ok) applyRecStatus(d); /* Sync from command response (has file) */
+    else { applyRecStatus({recording:0}); document.getElementById('rec-status').innerHTML='<span class="error">'+(d.error||'Failed')+'</span>'; }
   }
 }
 
 /* ── Music Playback (single Start/Stop toggle, auto-refresh list + play_status) ── */
 var s_currentPlaying='', s_currentIdx=-1;
-async function refreshPlayStatus() {
-  let ps=await apiGet('/api/audio/play_status');
+function applyPlayStatus(ps) {
   if(ps.playing) {
-    /* Sync from server: if file known and different from local, update */
     if(ps.file && ps.file.length>0 && s_currentPlaying!==ps.file) {
       s_currentPlaying=ps.file;
-      s_currentIdx=-1; /* idx unknown from server, will resolve in loadMusicList */
+      s_currentIdx=-1;
     }
     document.getElementById('play-status').textContent=s_currentPlaying?('Playing: '+s_currentPlaying):'Playing';
     document.getElementById('play-status').style.color='#2ecc71';
@@ -653,6 +659,10 @@ async function refreshPlayStatus() {
     document.getElementById('play-status').textContent='Stopped';
     document.getElementById('play-status').style.color='#3498db';
   }
+}
+async function refreshPlayStatus() {
+  let ps=await apiGet('/api/audio/play_status');
+  applyPlayStatus(ps);
 }
 async function loadMusicList() {
   /* Poll play_status to sync UI with actual device state */
@@ -676,23 +686,28 @@ async function loadMusicList() {
 }
 async function playToggle(fn,idx) {
   if(s_currentPlaying===fn) {
-    await apiGet('/api/audio/stop');
-    refreshPlayStatus();
+    /* Optimistic: show Stopped immediately */
+    applyPlayStatus({playing:false});
+    let d=await apiGet('/api/audio/stop');
+    if(d.ok) applyPlayStatus(d);
+    else refreshPlayStatus();
     loadMusicList();
   } else {
     if(s_currentPlaying) {
+      /* Optimistic: stop current first */
+      applyPlayStatus({playing:false});
       await apiGet('/api/audio/stop');
-      refreshPlayStatus();
     }
-    document.getElementById('play-status').textContent='Loading...';
+    /* Optimistic: show Loading immediately */
+    s_currentPlaying=fn; s_currentIdx=idx;
+    document.getElementById('play-status').textContent='Loading: '+fn;
     document.getElementById('play-status').style.color='#aaa';
     let d=await apiGet('/api/audio/play?file='+encodeURIComponent(fn));
     if(d.ok) {
-      s_currentPlaying=fn; s_currentIdx=idx;
-      document.getElementById('play-status').textContent='Playing: '+fn;
-      document.getElementById('play-status').style.color='#2ecc71';
+      applyPlayStatus(d);
       loadMusicList();
     } else {
+      s_currentPlaying=''; s_currentIdx=-1;
       document.getElementById('play-status').textContent='Play failed';
       document.getElementById('play-status').style.color='#e74c3c';
     }
@@ -767,27 +782,36 @@ async function deleteFile(name) {
 
 /* ── ULog ── */
 var s_ulogRunning=false;
-async function ulogToggle() {
-  if(s_ulogRunning) {
-    let d=await apiPost('/api/ulog/stop',{});
-    if(d.ok){ s_ulogRunning=false; refreshUlogStatus(); }
-  } else {
-    let d=await apiPost('/api/ulog/start',{});
-    if(d.ok){ s_ulogRunning=true; refreshUlogStatus(); }
-  }
-}
-async function refreshUlogStatus() {
-  let d=await apiGet('/api/ulog/status');
-  s_ulogRunning=d.running;
+function applyUlogStatus(d) {
+  s_ulogRunning=!!d.running;
   document.getElementById('btn-ulog').textContent=s_ulogRunning?'■':'▶';
   document.getElementById('btn-ulog').className='sm '+(s_ulogRunning?'red':'green');
   let info=s_ulogRunning?'Recording':'Stopped';
   if(d.filepath && d.filepath.length>0) {
-    let kb=Math.round(d.bytes_written/1024);
+    let kb=Math.round((d.bytes_written||0)/1024);
     info+=', file: '+d.filepath+' ('+kb+' KB)';
   }
   document.getElementById('ulog-status').textContent=info;
   document.getElementById('ulog-status').style.color=s_ulogRunning?'#e74c3c':'#3498db';
+}
+async function ulogToggle() {
+  if(s_ulogRunning) {
+    /* Optimistic: show Stopped immediately */
+    applyUlogStatus({running:false});
+    let d=await apiPost('/api/ulog/stop',{});
+    if(d.ok) applyUlogStatus(d); /* Sync from command response (has filepath/bytes) */
+    else refreshUlogStatus(); /* Revert on error */
+  } else {
+    /* Optimistic: show Recording immediately */
+    applyUlogStatus({running:true});
+    let d=await apiPost('/api/ulog/start',{});
+    if(d.ok) applyUlogStatus(d); /* Sync from command response (has filepath) */
+    else { applyUlogStatus({running:false}); document.getElementById('ulog-status').innerHTML='<span class="error">'+(d.error||'Failed')+'</span>'; }
+  }
+}
+async function refreshUlogStatus() {
+  let d=await apiGet('/api/ulog/status');
+  applyUlogStatus(d);
 }
 
 /* ── System Info (auto-refresh) ── */
@@ -1351,7 +1375,17 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
     }
     audio_unlock();
     ESP_LOGI(TAG, "Recording: %s", s_rec_path);
-    httpd_resp_sendstr(req, "{\"ok\":1}");
+    /* Return status so client can update UI immediately without a second round-trip */
+    cJSON *root = cJSON_CreateObject();
+    if (root) {
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddBoolToObject(root, "recording", true);
+        cJSON_AddStringToObject(root, "file", s_rec_path);
+        char *j = cJSON_PrintUnformatted(root);
+        if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+        else httpd_resp_sendstr(req, "{\"ok\":1,\"recording\":true}");
+        cJSON_Delete(root);
+    } else httpd_resp_sendstr(req, "{\"ok\":1,\"recording\":true}");
     return ESP_OK;
 }
 
@@ -1393,9 +1427,19 @@ static esp_err_t _api_rec_stop(httpd_req_t *req) {
     char saved[128]; strlcpy(saved, s_rec_path, sizeof(saved));
     uint32_t total_bytes = s_rec_bytes.load(std::memory_order_relaxed);
     audio_unlock();
-    char r[256]; snprintf(r, sizeof(r), "{\"ok\":1,\"file\":\"%s\",\"bytes\":%lu}", saved, (unsigned long)total_bytes);
+    /* Return status so client can update UI immediately */
+    cJSON *root = cJSON_CreateObject();
+    if (root) {
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddBoolToObject(root, "recording", false);
+        cJSON_AddStringToObject(root, "file", saved);
+        cJSON_AddNumberToObject(root, "bytes", (double)total_bytes);
+        char *j = cJSON_PrintUnformatted(root);
+        if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+        else httpd_resp_sendstr(req, "{\"ok\":1,\"recording\":false}");
+        cJSON_Delete(root);
+    } else httpd_resp_sendstr(req, "{\"ok\":1,\"recording\":false}");
     ESP_LOGI(TAG, "Saved AAC: %s (%lu)", saved, (unsigned long)total_bytes);
-    httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
@@ -1477,7 +1521,18 @@ static esp_err_t _api_play(httpd_req_t *req) {
     strlcpy(s_playing_file, base, sizeof(s_playing_file));
     audio_unlock();
     ESP_LOGI(TAG, "Play: %s", uri);
-    httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+    /* Return status so client can update UI immediately */
+    cJSON *root = cJSON_CreateObject();
+    if (root) {
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddBoolToObject(root, "playing", true);
+        cJSON_AddStringToObject(root, "file", base);
+        char *j = cJSON_PrintUnformatted(root);
+        if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+        else httpd_resp_sendstr(req, "{\"ok\":1,\"playing\":true}");
+        cJSON_Delete(root);
+    } else httpd_resp_sendstr(req, "{\"ok\":1,\"playing\":true}");
+    return ESP_OK;
 }
 
 /* GET /api/audio/stop */
@@ -1492,7 +1547,7 @@ static esp_err_t _api_stop(httpd_req_t *req) {
         s_playing_file[0] = '\0';
     }
     audio_unlock();
-    httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+    httpd_resp_sendstr(req, "{\"ok\":1,\"playing\":false}"); return ESP_OK;
 }
 
 /* GET /api/audio/play_status */
@@ -1721,7 +1776,21 @@ static esp_err_t _api_ulog_start(httpd_req_t *req) {
     ulog_writer_t *ulog = ulog_writer_get();
     esp_err_t err = ulog_writer_start(ulog);
     httpd_resp_set_type(req, "application/json");
-    if (err == ESP_OK) httpd_resp_sendstr(req, "{\"ok\":1}");
+    if (err == ESP_OK) {
+        /* Return status so client can update UI immediately */
+        const char *fp = ulog_writer_get_filepath(ulog);
+        cJSON *root = cJSON_CreateObject();
+        if (root) {
+            cJSON_AddBoolToObject(root, "ok", true);
+            cJSON_AddBoolToObject(root, "running", true);
+            cJSON_AddStringToObject(root, "filepath", fp ? fp : "");
+            cJSON_AddNumberToObject(root, "bytes_written", (double)ulog_writer_get_bytes_written(ulog));
+            char *j = cJSON_PrintUnformatted(root);
+            if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+            else httpd_resp_sendstr(req, "{\"ok\":1,\"running\":true}");
+            cJSON_Delete(root);
+        } else httpd_resp_sendstr(req, "{\"ok\":1,\"running\":true}");
+    }
     else httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Start failed\"}");
     return ESP_OK;
 }
@@ -1729,9 +1798,26 @@ static esp_err_t _api_ulog_start(httpd_req_t *req) {
 /* POST /api/ulog/stop */
 static esp_err_t _api_ulog_stop(httpd_req_t *req) {
     ulog_writer_t *ulog = ulog_writer_get();
+    /* Capture final state before stopping */
+    const char *fp = ulog_writer_get_filepath(ulog);
+    size_t final_bytes = ulog_writer_get_bytes_written(ulog);
+    char filepath_snap[128] = {};
+    if (fp) strlcpy(filepath_snap, fp, sizeof(filepath_snap));
     ulog_writer_stop(ulog);
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+    /* Return status so client can update UI immediately */
+    cJSON *root = cJSON_CreateObject();
+    if (root) {
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddBoolToObject(root, "running", false);
+        cJSON_AddStringToObject(root, "filepath", filepath_snap);
+        cJSON_AddNumberToObject(root, "bytes_written", (double)final_bytes);
+        char *j = cJSON_PrintUnformatted(root);
+        if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+        else httpd_resp_sendstr(req, "{\"ok\":1,\"running\":false}");
+        cJSON_Delete(root);
+    } else httpd_resp_sendstr(req, "{\"ok\":1,\"running\":false}");
+    return ESP_OK;
 }
 
 /* ── Web UI handler ──────────────────────────────────────────────── */
