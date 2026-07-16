@@ -1443,7 +1443,6 @@ static esp_err_t _api_rec_stop(httpd_req_t *req) {
 /* GET /api/audio/record_status */
 static esp_err_t _api_rec_status(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
-    char r[256];
     if (s_is_recording) {
         audio_lock();
         uint32_t bytes = s_rec_bytes.load(std::memory_order_relaxed);
@@ -1451,9 +1450,18 @@ static esp_err_t _api_rec_status(httpd_req_t *req) {
         char path_snap[128]; strlcpy(path_snap, s_rec_path, sizeof(path_snap));
         audio_unlock();
         uint32_t e = (uint32_t)((esp_timer_get_time() / 1000 - start_ms) / 1000);
-        snprintf(r, sizeof(r), "{\"recording\":1,\"seconds\":%lu,\"bytes\":%lu,\"file\":\"%s\"}", (unsigned long)e, (unsigned long)bytes, path_snap);
-    } else snprintf(r, sizeof(r), "{\"recording\":0}");
-    httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
+
+        cJSON *root = cJSON_CreateObject();
+        if (!root) { httpd_resp_sendstr(req, "{}"); return ESP_OK; }
+        cJSON_AddBoolToObject(root, "recording", true);
+        cJSON_AddNumberToObject(root, "seconds", (double)e);
+        cJSON_AddNumberToObject(root, "bytes", (double)bytes);
+        cJSON_AddStringToObject(root, "file", path_snap);
+        char *j = cJSON_PrintUnformatted(root);
+        if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+        else httpd_resp_sendstr(req, "{}");
+        cJSON_Delete(root);
+    } else httpd_resp_sendstr(req, "{\"recording\":0}");
     return ESP_OK;
 }
 
@@ -1552,9 +1560,15 @@ static esp_err_t _api_play_status(httpd_req_t *req) {
     bool playing = s_playing.load(std::memory_order_acquire);
     char file_snap[128]; strlcpy(file_snap, s_playing_file, sizeof(file_snap));
     audio_unlock();
-    char r[256];
-    snprintf(r, sizeof(r), "{\"playing\":%s,\"file\":\"%s\"}", playing ? "true" : "false", file_snap);
-    httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) { httpd_resp_sendstr(req, "{}"); return ESP_OK; }
+    cJSON_AddBoolToObject(root, "playing", playing);
+    cJSON_AddStringToObject(root, "file", file_snap);
+    char *j = cJSON_PrintUnformatted(root);
+    if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+    else httpd_resp_sendstr(req, "{}");
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
