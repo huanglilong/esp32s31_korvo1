@@ -57,7 +57,6 @@
 #include "ulog_writer.h"
 
 /* Audio recording / playback */
-#include "layer3.h"  /* shine MP3 encoder */
 #include "esp_audio_simple_player.h"
 
 static const char *TAG = "web_config";
@@ -68,20 +67,18 @@ static httpd_handle_t s_httpd = nullptr;
 
 #define REC_BUF_SAMPLES      480
 #define REC_BUF_BYTES        (REC_BUF_SAMPLES * 2 * sizeof(int16_t))
-#define PCM_BUF_MAX_SAMPLES  (1152 * 2)  /* Max PCM buffer: 1152 samples/ch × 2 ch = 2304 int16_t */
-/* samples_per_ch is determined dynamically from shine_encoder once initialized */
+
+/* WAV header: 44 bytes + PCM data.
+ * WAV format uses little-endian, same as ESP32-S31 (RISC-V). */
 
 static std::atomic<TaskHandle_t> s_audio_task{nullptr};
 static StackType_t   *s_audio_stack = NULL;
 static StaticTask_t  *s_audio_tcb = NULL;
 static std::atomic<bool>  s_audio_running{false};
 static std::atomic<bool>  s_is_recording{false};
-static shine_t        s_shine = NULL;
-static int16_t       *s_pcm_buf = NULL;
-static int            s_enc_spc = 0;       /* Samples per channel for encoder (dynamically set) */
-static std::atomic<int>  s_pcm_count{0};
 static FILE          *s_rec_file = NULL;
 static std::atomic<uint32_t> s_rec_bytes{0};
+static std::atomic<uint32_t> s_rec_data_bytes{0};  /* PCM payload only, for WAV header update */
 static std::atomic<uint32_t> s_rec_start_ms{0};
 static char           s_rec_path[128];
 
@@ -119,31 +116,22 @@ static void _stop_audio_task_if_running(void)
     if (s_audio_stack) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; }
 }
 
-/* Audio recording task: codec ADC → shine MP3 → SD card */
+/* Audio recording task: codec ADC → PCM WAV → SD card.
+ * Writes a temporary WAV header first, then appends raw PCM data.
+ * On stop, seeks back to patch header with final file size. */
 static void audio_task(void *arg)
 {
     (void)arg;
     int16_t *buf = (int16_t *)heap_caps_calloc(1, REC_BUF_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) { s_audio_running = false; s_audio_task.store(nullptr, std::memory_order_release); vTaskDelete(NULL); return; }
     while (s_audio_running) {
-        /* Use AudioDriver::codec_read() which internally uses the BSP-managed I2S handle */
         int n = AudioDriver::instance().codec_read((uint8_t*)buf, REC_BUF_BYTES);
         if (n <= 0) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
-        int32_t spc = n / (2 * sizeof(int16_t));
 
-        if (s_is_recording && s_pcm_buf && s_shine) {
-            int enc_spc = s_enc_spc;  /* Local copy: 576 @ 16000 Hz (MPEG-II) */
-            for (int32_t i = 0; i < spc; i++) {
-                int idx = s_pcm_count.load(std::memory_order_relaxed);
-                s_pcm_buf[idx * 2]     = buf[i * 2];
-                s_pcm_buf[idx * 2 + 1] = buf[i * 2 + 1];
-                if (s_pcm_count.fetch_add(1, std::memory_order_relaxed) + 1 >= enc_spc) {
-                    int wr = 0;
-                    unsigned char *mp3 = shine_encode_buffer_interleaved(s_shine, s_pcm_buf, &wr);
-                    if (mp3 && wr > 0 && s_rec_file) s_rec_bytes.fetch_add(fwrite(mp3, 1, wr, s_rec_file), std::memory_order_relaxed);
-                    s_pcm_count.store(0, std::memory_order_relaxed);
-                }
-            }
+        if (s_is_recording && s_rec_file) {
+            size_t written = fwrite(buf, 1, (size_t)n, s_rec_file);
+            s_rec_bytes.fetch_add((uint32_t)written, std::memory_order_relaxed);
+            s_rec_data_bytes.fetch_add((uint32_t)written, std::memory_order_relaxed);
         }
     }
     heap_caps_free(buf);
@@ -626,7 +614,7 @@ async function loadMusicList() {
       h+='<button class="sm '+(isCurrentPlaying?'red':'green')+'" id="btn_play_'+i+'" onclick=\'playToggle('+ej+','+i+')\'>'+(isCurrentPlaying?'■':'▶')+'</button>';
       h+='</div>';
     });
-  } else h='<div style="color:#666;padding:8px">No MP3 files</div>';
+  } else h='<div style="color:#666;padding:8px">No WAV/MP3 files</div>';
   document.getElementById('music-list').innerHTML=h;
 }
 var s_currentPlaying='', s_currentIdx=-1;
@@ -1208,6 +1196,60 @@ static esp_err_t _api_sdcard_info(httpd_req_t *req) {
 
 /* ── Audio Recording / Playback / File Manager / ULog handlers ── */
 
+/* Write a 44-byte WAV header for 16-bit PCM stereo.
+ * WAV format is little-endian (native on ESP32-S31 RISC-V).
+ * Returns 0 on success, -1 on failure. */
+static int _wav_write_header(FILE *f, uint32_t data_size) {
+    if (!f) return -1;
+    uint32_t sample_rate = 16000;
+    uint16_t channels = 2;
+    uint16_t bits_per_sample = 16;
+    uint32_t byte_rate = sample_rate * channels * bits_per_sample / 8;
+    uint16_t block_align = channels * bits_per_sample / 8;
+    uint32_t riff_size = 36 + data_size;
+
+    uint8_t hdr[44];
+    memset(hdr, 0, sizeof(hdr));
+    /* RIFF header */
+    hdr[0] = 'R'; hdr[1] = 'I'; hdr[2] = 'F'; hdr[3] = 'F';
+    hdr[4] = (uint8_t)(riff_size); hdr[5] = (uint8_t)(riff_size >> 8);
+    hdr[6] = (uint8_t)(riff_size >> 16); hdr[7] = (uint8_t)(riff_size >> 24);
+    hdr[8] = 'W'; hdr[9] = 'A'; hdr[10] = 'V'; hdr[11] = 'E';
+    /* fmt chunk */
+    hdr[12] = 'f'; hdr[13] = 'm'; hdr[14] = 't'; hdr[15] = ' ';
+    hdr[16] = 16; hdr[17] = 0; hdr[18] = 0; hdr[19] = 0;  /* Subchunk1Size = 16 */
+    hdr[20] = 1;  hdr[21] = 0;                             /* AudioFormat = 1 (PCM) */
+    hdr[22] = (uint8_t)(channels); hdr[23] = (uint8_t)(channels >> 8);
+    hdr[24] = (uint8_t)(sample_rate); hdr[25] = (uint8_t)(sample_rate >> 8);
+    hdr[26] = (uint8_t)(sample_rate >> 16); hdr[27] = (uint8_t)(sample_rate >> 24);
+    hdr[28] = (uint8_t)(byte_rate); hdr[29] = (uint8_t)(byte_rate >> 8);
+    hdr[30] = (uint8_t)(byte_rate >> 16); hdr[31] = (uint8_t)(byte_rate >> 24);
+    hdr[32] = (uint8_t)(block_align); hdr[33] = (uint8_t)(block_align >> 8);
+    hdr[34] = (uint8_t)(bits_per_sample); hdr[35] = (uint8_t)(bits_per_sample >> 8);
+    /* data chunk */
+    hdr[36] = 'd'; hdr[37] = 'a'; hdr[38] = 't'; hdr[39] = 'a';
+    hdr[40] = (uint8_t)(data_size); hdr[41] = (uint8_t)(data_size >> 8);
+    hdr[42] = (uint8_t)(data_size >> 16); hdr[43] = (uint8_t)(data_size >> 24);
+    return fwrite(hdr, 1, 44, f) == 44 ? 0 : -1;
+}
+
+/* Patch WAV header with final data size (seeks back to byte 4 and 40). */
+static int _wav_patch_header(FILE *f, uint32_t data_size) {
+    if (!f) return -1;
+    uint32_t riff_size = 36 + data_size;
+    /* Patch RIFF size at offset 4 */
+    if (fseek(f, 4, SEEK_SET) != 0) return -1;
+    uint8_t buf[4];
+    buf[0] = (uint8_t)(riff_size); buf[1] = (uint8_t)(riff_size >> 8);
+    buf[2] = (uint8_t)(riff_size >> 16); buf[3] = (uint8_t)(riff_size >> 24);
+    if (fwrite(buf, 1, 4, f) != 4) return -1;
+    /* Patch data size at offset 40 */
+    buf[0] = (uint8_t)(data_size); buf[1] = (uint8_t)(data_size >> 8);
+    buf[2] = (uint8_t)(data_size >> 16); buf[3] = (uint8_t)(data_size >> 24);
+    if (fseek(f, 40, SEEK_SET) != 0) return -1;
+    return fwrite(buf, 1, 4, f) == 4 ? 0 : -1;
+}
+
 /* GET /api/audio/record_start */
 static esp_err_t _api_rec_start(httpd_req_t *req) {
     audio_lock();
@@ -1230,36 +1272,41 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
         s_audio_task.store(h, std::memory_order_release);
         if (!h) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
     }
-    s_pcm_buf = (int16_t*)heap_caps_calloc(1, PCM_BUF_MAX_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!s_pcm_buf) { audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
-    s_pcm_count.store(0, std::memory_order_relaxed);
-    shine_config_t c; shine_set_config_mpeg_defaults(&c.mpeg);
-    c.wave.channels = PCM_STEREO; c.wave.samplerate = 16000; c.mpeg.mode = STEREO; c.mpeg.bitr = 128;
-    s_shine = shine_initialise(&c);
-    if (!s_shine) { heap_caps_free(s_pcm_buf); s_pcm_buf = NULL; audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
-    s_enc_spc = shine_samples_per_pass(s_shine);  /* 576 for 16000 Hz MPEG-II */
-    if (s_enc_spc <= 0 || s_enc_spc > 1152) {
-        ESP_LOGE(TAG, "Invalid encoder samples per channel: %d", s_enc_spc);
-        shine_close(s_shine); s_shine = NULL;
-        heap_caps_free(s_pcm_buf); s_pcm_buf = NULL;
-        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
-    }
-    /* Set microphone PGA gain (ES8389 max hardware gain is 36.5 dB, BSP example uses 50 dB) */
+
+    /* Set microphone PGA gain (ES8389 max hardware gain is 36.5 dB) */
     AudioDriver::instance().set_mic_gain(40);
+
+    /* Generate WAV filename with wall-clock timestamp if available */
     struct timeval tv; gettimeofday(&tv, NULL);
     time_t t = tv.tv_sec; struct tm tm_buf;
     localtime_r(&t, &tm_buf);
     if (tm_buf.tm_year + 1900 > 2020) {
-        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%04d%02d%02d_%02d%02d%02d.mp3",
+        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%04d%02d%02d_%02d%02d%02d.wav",
                  tm_buf.tm_year+1900, tm_buf.tm_mon+1, tm_buf.tm_mday, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec);
     } else {
         uint32_t mono_ms = (uint32_t)(esp_timer_get_time() / 1000);
-        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%lu.mp3", (unsigned long)mono_ms);
+        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%lu.wav", (unsigned long)mono_ms);
     }
+
     s_rec_file = fopen(s_rec_path, "wb");
-    if (!s_rec_file) { shine_close(s_shine); s_shine = NULL; heap_caps_free(s_pcm_buf); s_pcm_buf = NULL;
-        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
-    s_rec_bytes = 0; s_rec_start_ms.store((uint32_t)(esp_timer_get_time() / 1000), std::memory_order_relaxed);
+    if (!s_rec_file) {
+        audio_unlock(); _stop_audio_task_if_running();
+        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Cannot create file\"}");
+        return ESP_OK;
+    }
+
+    /* Write initial WAV header with 0 data size (will be patched on stop) */
+    if (_wav_write_header(s_rec_file, 0) != 0) {
+        ESP_LOGE(TAG, "Failed to write WAV header");
+        fclose(s_rec_file); s_rec_file = NULL;
+        audio_unlock(); _stop_audio_task_if_running();
+        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"WAV header write failed\"}");
+        return ESP_OK;
+    }
+
+    s_rec_bytes = 44;  /* Header bytes already written */
+    s_rec_data_bytes = 0;
+    s_rec_start_ms.store((uint32_t)(esp_timer_get_time() / 1000), std::memory_order_relaxed);
     s_is_recording = true;
 
     /* Stop any active playback — recording and playback share I2S */
@@ -1288,22 +1335,24 @@ static esp_err_t _api_rec_stop(httpd_req_t *req) {
     audio_lock();
     if (!s_is_recording) {
         _stop_audio_task_if_running();
-        if (s_shine) { shine_close(s_shine); s_shine = NULL; }
-        if (s_pcm_buf) { heap_caps_free(s_pcm_buf); s_pcm_buf = NULL; }
-        if (s_rec_file) { fclose(s_rec_file); s_rec_file = NULL; }
         audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
     }
     s_is_recording = false;
     _stop_audio_task_if_running();
+
+    /* Patch WAV header with final data size */
     FILE *f = s_rec_file; s_rec_file = NULL;
-    if (s_shine) { int wr = 0; unsigned char *d = shine_flush(s_shine, &wr); if (d && wr > 0 && f) fwrite(d, 1, wr, f); shine_close(s_shine); s_shine = NULL; }
-    if (f) fclose(f);
-    if (s_pcm_buf) { heap_caps_free(s_pcm_buf); s_pcm_buf = NULL; }
+    uint32_t data_bytes = s_rec_data_bytes.load(std::memory_order_relaxed);
+    if (f) {
+        _wav_patch_header(f, data_bytes);
+        fclose(f);
+    }
+
     char saved[128]; strlcpy(saved, s_rec_path, sizeof(saved));
-    uint32_t saved_bytes = s_rec_bytes.load(std::memory_order_relaxed);
+    uint32_t total_bytes = 44 + data_bytes;  /* header + payload */
     audio_unlock();
-    char r[256]; snprintf(r, sizeof(r), "{\"ok\":1,\"file\":\"%s\",\"bytes\":%lu}", saved, (unsigned long)saved_bytes);
-    ESP_LOGI(TAG, "Saved: %s (%lu)", saved, (unsigned long)saved_bytes);
+    char r[256]; snprintf(r, sizeof(r), "{\"ok\":1,\"file\":\"%s\",\"bytes\":%lu}", saved, (unsigned long)total_bytes);
+    ESP_LOGI(TAG, "Saved WAV: %s (%lu bytes total, %lu PCM)", saved, (unsigned long)total_bytes, (unsigned long)data_bytes);
     httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
@@ -1334,7 +1383,7 @@ static esp_err_t _api_audio_list(httpd_req_t *req) {
     cJSON *arr = cJSON_CreateArray();
     if (!root || !arr) { if (d) closedir(d); if (arr) cJSON_Delete(arr); if (root) cJSON_Delete(root); httpd_resp_send_500(req); return ESP_FAIL; }
     cJSON_AddItemToObject(root, "files", arr);
-    if (d) { struct dirent *e; while ((e = readdir(d))) { if (e->d_name[0] == '.') continue; char *x = strrchr(e->d_name, '.'); if (x && strcasecmp(x, ".mp3") == 0) cJSON_AddItemToArray(arr, cJSON_CreateString(e->d_name)); } closedir(d); }
+    if (d) { struct dirent *e; while ((e = readdir(d))) { if (e->d_name[0] == '.') continue; char *x = strrchr(e->d_name, '.'); if (x && (strcasecmp(x, ".wav") == 0 || strcasecmp(x, ".mp3") == 0)) cJSON_AddItemToArray(arr, cJSON_CreateString(e->d_name)); } closedir(d); }
     char *j = cJSON_PrintUnformatted(root);
     if (!j) { cJSON_Delete(root); httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
@@ -1343,7 +1392,7 @@ static esp_err_t _api_audio_list(httpd_req_t *req) {
     return ESP_OK;
 }
 
-/* GET /api/audio/play?file=xxx.mp3 */
+/* GET /api/audio/play?file=xxx.wav */
 static esp_err_t _api_play(httpd_req_t *req) {
     audio_lock();
     if (!AudioDriver::instance().available()) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio not available\"}"); return ESP_OK; }

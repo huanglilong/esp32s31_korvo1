@@ -532,6 +532,6 @@ direct_dependencies:
 - espressif/mdns
 - idf
 - protocol_examples_common
-manifest_hash: 8169a6b9bc1aa92df557779ac4cfbe288487bf431fdb8f652ad6f15e630e5da0
+manifest_hash: 04d1bcd7094d709566a6c455297e0f09fe63d2bee337aed74068b6176122b5d6
 target: esp32s31
 version: 3.0.0
