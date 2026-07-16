@@ -1,8 +1,39 @@
 """Shared fixtures and helpers for ESP32-S31 Korvo-1 web config integration tests."""
 
 import os
+import sys
+import time
 import pytest
 import requests
+
+
+def _log(msg: str = "", *, color: str | None = None):
+    """Write a line directly to the terminal, bypassing pytest output capture.
+
+    Opens ``/dev/tty`` (the controlling terminal) so output is visible
+    even when pytest redirects stdout/stderr (e.g. ``-v`` without ``-s``).
+    Falls back to ``sys.stderr`` if ``/dev/tty`` is unavailable.
+    """
+    colors = {
+        "green":  "\033[32m",
+        "yellow": "\033[33m",
+        "red":    "\033[31m",
+        "bold":   "\033[1m",
+    }
+    reset = "\033[0m"
+    line = f"{msg}\n"
+    if color:
+        line = f"{colors.get(color, '')}{msg}{reset}\n"
+    try:
+        with open("/dev/tty", "w", encoding="utf-8", errors="replace") as tty:
+            tty.write(line)
+            tty.flush()
+    except OSError:
+        sys.stderr.write(line)
+        sys.stderr.flush()
+
+
+# ── CLI options ────────────────────────────────────────────────────────
 
 
 def pytest_addoption(parser):
@@ -12,6 +43,137 @@ def pytest_addoption(parser):
         help="ESP32-S31 base URL (e.g., http://10.0.0.42:8080). "
              "Overrides ESP_BASE_URL env var and default.",
     )
+    parser.addoption(
+        "--wait-timeout",
+        default=None,
+        help="Max seconds to wait for device WiFi connection before tests "
+             "(default: 120). Overrides ESP_WAIT_TIMEOUT env var.",
+    )
+    parser.addoption(
+        "--no-wait",
+        action="store_true",
+        default=False,
+        help="Skip the device WiFi readiness check entirely.",
+    )
+
+
+# ── Resolve base URL ──────────────────────────────────────────────────
+
+
+def _resolve_base_url(config) -> str:
+    """Resolve base URL from CLI / env / default."""
+    cli = config.getoption("--base-url")
+    if cli:
+        return cli
+    env = os.environ.get("ESP_BASE_URL")
+    if env:
+        return env
+    return "http://esp-web.local:8080"
+
+
+# ── Hook: WiFi readiness check (runs before any test) ─────────────────
+
+
+def pytest_collection_modifyitems(config, items):
+    """Hook: runs after collection, before any test execution.
+
+    Wait for device WiFi connection here so the readiness check
+    appears *before* the first test name in the output.
+    """
+    if config.getoption("--no-wait"):
+        _log("⏩  Skipping device readiness check (--no-wait)", color="yellow")
+        return
+
+    base_url = _resolve_base_url(config)
+    max_wait = (
+        config.getoption("--wait-timeout")
+        or os.environ.get("ESP_WAIT_TIMEOUT")
+        or 120
+    )
+    max_wait = int(max_wait)
+    interval = 3
+    deadline = time.time() + max_wait
+    last_error = None
+    elapsed = 0
+    attempt = 0
+
+    s = requests.Session()
+    s.headers.update({"Accept": "application/json"})
+
+    _log()
+    _log("─" * 60, color="bold")
+    _log("  Device Readiness Check", color="bold")
+    _log("─" * 60, color="bold")
+    _log(f"  Target  : {base_url}")
+    _log(f"  Timeout : {max_wait}s  |  Interval : {interval}s")
+    _log(f"  Polling : GET /api/wifi/status until connected=true")
+    _log()
+
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            r = s.get(f"{base_url}/api/wifi/status", timeout=5)
+            r.raise_for_status()
+            status = r.json()
+            if status.get("connected"):
+                ssid = status.get("ssid", "?")
+                ip = status.get("ip", "?")
+                rssi = status.get("rssi", "?")
+                _log(f"  ✓ WiFi connected! "
+                     f"SSID={ssid}, IP={ip}, RSSI={rssi} "
+                     f"(attempt #{attempt}, {elapsed}s elapsed)",
+                     color="green")
+                _log()
+                break
+            else:
+                configured = status.get("configured", False)
+                ssid = status.get("ssid", "")
+                _log(f"  ⏳ [{attempt}] Device reachable but WiFi not connected "
+                     f"(configured={configured}, ssid={ssid}), retrying ...")
+        except requests.RequestException as e:
+            last_error = e
+            remaining = int(deadline - time.time())
+            _log(f"  ⏳ [{attempt}] Device not reachable ({type(e).__name__}), "
+                 f"retrying ... ({remaining}s left)")
+        time.sleep(interval)
+        elapsed = int(time.time() - (deadline - max_wait))
+    else:
+        pytest.exit(
+            f"❌  Device not ready after {max_wait}s at {base_url} "
+            f"({attempt} attempts)"
+            + (f" — last error: {last_error}" if last_error else "")
+        )
+
+    # ── Print device info ────────────────────────────────────────────
+    _log("─" * 60, color="bold")
+    _log("  Device Info", color="bold")
+    _log("─" * 60, color="bold")
+    _log(f"  Target : {base_url}")
+    try:
+        r = s.get(f"{base_url}/api/system/info", timeout=10)
+        r.raise_for_status()
+        info = r.json()
+        _log(f"  Chip       : {info.get('chip', '?')}")
+        _log(f"  CPU cores  : {info.get('cpu_cores', '?')}")
+        _log(f"  CPU freq   : {info.get('cpu_freq', '?')} MHz")
+        _log(f"  Flash      : {info.get('flash_size', '?')} MB")
+        _log(f"  PSRAM      : {info.get('psram_size', '?')} MB")
+        _log(f"  SDK        : {info.get('sdk_version', '?')}")
+        wifi = "✓" if info.get("wifi_connected") else "✗"
+        _log(f"  WiFi       : {wifi}  SSID={info.get('wifi_ssid', '(none)')}")
+        sd = "✓" if info.get("sdcard_mounted") else "✗"
+        _log(f"  SD card    : {sd}")
+        _log(f"  Free heap  : {info.get('free_heap', '?')} KB")
+        _log(f"  Uptime     : {info.get('uptime', '?')} s")
+        sntp = "✓" if info.get("sntp_synced") else "✗"
+        _log(f"  SNTP sync  : {sntp}")
+        _log(f"  Timezone   : {info.get('timezone', '?')}")
+    except requests.RequestException as e:
+        _log(f"  ⚠️  Failed to fetch device info: {e}", color="red")
+    _log()
+
+
+# ── Fixtures ──────────────────────────────────────────────────────────
 
 
 @pytest.fixture(scope="session")
@@ -23,13 +185,7 @@ def base_url(request) -> str:
       2. ESP_BASE_URL environment variable
       3. Built-in default (mDNS hostname)
     """
-    cli = request.config.getoption("--base-url")
-    if cli:
-        return cli
-    env = os.environ.get("ESP_BASE_URL")
-    if env:
-        return env
-    return "http://esp-web.local:8080"
+    return _resolve_base_url(request.config)
 
 
 @pytest.fixture(scope="session")
@@ -38,36 +194,6 @@ def client() -> requests.Session:
     s = requests.Session()
     s.headers.update({"Accept": "application/json"})
     return s
-
-
-@pytest.fixture(scope="session", autouse=True)
-def device_info(client: requests.Session, base_url: str):
-    """Fetch and print target device info at the start of the test run."""
-    print(f"\n{'='*60}")
-    print(f"Target device: {base_url}")
-    try:
-        r = client.get(f"{base_url}/api/system/info", timeout=10)
-        r.raise_for_status()
-        info = r.json()
-        print(f"  Chip       : {info.get('chip', '?')}")
-        print(f"  CPU cores  : {info.get('cpu_cores', '?')}")
-        print(f"  CPU freq   : {info.get('cpu_freq', '?')} MHz")
-        print(f"  Flash      : {info.get('flash_size', '?')} MB")
-        print(f"  PSRAM      : {info.get('psram_size', '?')} MB")
-        print(f"  SDK        : {info.get('sdk_version', '?')}")
-        wifi = "✓" if info.get("wifi_connected") else "✗"
-        print(f"  WiFi       : {wifi}  SSID={info.get('wifi_ssid', '(none)')}")
-        sd = "✓" if info.get("sdcard_mounted") else "✗"
-        print(f"  SD card    : {sd}")
-        print(f"  Free heap  : {info.get('free_heap', '?')} KB")
-        print(f"  Uptime     : {info.get('uptime', '?')} s")
-        sntp = "✓" if info.get("sntp_synced") else "✗"
-        print(f"  SNTP sync  : {sntp}")
-        print(f"  Timezone   : {info.get('timezone', '?')}")
-    except requests.RequestException as e:
-        print(f"  ⚠️  Failed to fetch device info: {e}")
-    print(f"{'='*60}\n")
-    yield
 
 
 @pytest.fixture
