@@ -1018,7 +1018,8 @@ static esp_err_t _api_system_info(httpd_req_t *req) {
     }
 
     /* PSRAM */
-    cJSON_AddNumberToObject(root, "psram_size", 16);  /* ESP32-S31-WROOM-3 has 16MB PSRAM */
+    uint32_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    cJSON_AddNumberToObject(root, "psram_size", psram_size / (1024 * 1024));
 
     /* SDK version */
     cJSON_AddStringToObject(root, "sdk_version", esp_get_idf_version());
@@ -1269,9 +1270,13 @@ static esp_err_t _api_sdcard_info(httpd_req_t *req) {
     cJSON_AddStringToObject(root, "mountpoint", SDMMC_MOUNT_POINT);
 
     if (SDCardDriver::instance().available()) {
-        struct stat st;
-        if (stat(SDMMC_MOUNT_POINT, &st) == 0) {
-            cJSON_AddNumberToObject(root, "total_kb", st.st_size / 1024);  /* Approximation */
+        /* Get filesystem capacity via fatfs (same as _api_files_list) */
+        FATFS *fs; DWORD free_clust;
+        if (f_getfree("", &free_clust, &fs) == FR_OK && fs) {
+            uint64_t total_kb = (uint64_t)(fs->n_fatent - 2) * fs->csize * fs->ssize / 1024;
+            uint64_t free_kb = (uint64_t)free_clust * fs->csize * fs->ssize / 1024;
+            cJSON_AddNumberToObject(root, "total_kb", (double)total_kb);
+            cJSON_AddNumberToObject(root, "free_kb", (double)free_kb);
         }
     }
 
