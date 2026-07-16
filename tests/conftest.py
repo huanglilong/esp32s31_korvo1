@@ -160,6 +160,12 @@ def api(client: requests.Session, base_url: str):
             return r.json()
 
         @staticmethod
+        def play_status():
+            r = client.get(f"{base_url}/api/audio/play_status", timeout=5)
+            r.raise_for_status()
+            return r.json()
+
+        @staticmethod
         def audio_stop():
             r = client.get(f"{base_url}/api/audio/stop", timeout=5)
             r.raise_for_status()

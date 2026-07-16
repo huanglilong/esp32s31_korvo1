@@ -9,8 +9,8 @@ extern "C" {
  *
  * Launches an HTTP server on port 8080 with a 4-tab web UI for:
  *   - WiFi: Auto-scan (10s), select SSID → password modal
- *   - Audio Recording (shine MP3 encoder, I2S RX → SD card, status with file path)
- *   - Music Playback (esp_audio_simple_player, SD card MP3, auto-refresh 5s)
+ *   - Audio Recording (WAV PCM, I2S RX → SD card, status with file path)
+ *   - Music Playback (esp_audio_simple_player, SD card WAV/MP3, play_status poll, auto-refresh 5s)
  *   - File Manager (list / download / delete with status bar updates)
  *   - ULog Control (start / stop / status with file path, auto-refresh 3s)
  *   - Speaker Volume (0-100, real-time slider with NVS debounce)

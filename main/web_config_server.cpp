@@ -6,7 +6,7 @@
  *   WiFi:  GET  /api/wifi/scan, POST /api/wifi/connect, GET /api/wifi/status
  *   Audio: POST /api/audio/volume, GET /api/audio/volume
  *          GET  /api/audio/record_start, /api/audio/record_stop, /api/audio/record_status
- *          GET  /api/audio/list, /api/audio/play, /api/audio/stop
+ *          GET  /api/audio/list, /api/audio/play, /api/audio/play_status, /api/audio/stop
  *   Files: GET  /api/files/list, GET /api/files/download,
  *          POST /api/files/delete, POST /api/files/delete_batch
  *   ULog:  GET  /api/ulog/status, POST /api/ulog/start, POST /api/ulog/stop
@@ -16,7 +16,7 @@
  *
  * Web UI: GET / — 4-tab page with auto-refresh:
  *   WiFi:    Auto-scan (10s), select SSID → password modal, no manual Scan/Connect
- *   Audio:   Record (Start/Stop toggle + status), Music Player (auto-refresh 5s)
+ *   Audio:   Record (Start/Stop toggle + status), Music Player (auto-refresh 5s, play_status poll)
  *   Files:   File manager with download/delete status bar updates
  *   System:  System Info (auto-refresh 5s), Volume (real-time slider), ULog Record (Start/Stop toggle + status, auto-refresh 3s)
  *
@@ -628,8 +628,15 @@ async function pollRecStatus() {
   }
 }
 
-/* ── Music Playback (single Start/Stop toggle, auto-refresh list) ── */
+/* ── Music Playback (single Start/Stop toggle, auto-refresh list + play_status) ── */
 async function loadMusicList() {
+  /* Poll play_status to sync UI with actual device state */
+  let ps=await apiGet('/api/audio/play_status');
+  if(!ps.playing && s_currentPlaying) {
+    s_currentPlaying=''; s_currentIdx=-1;
+    document.getElementById('play-status').textContent='Stopped';
+    document.getElementById('play-status').style.color='#3498db';
+  }
   let d=await apiGet('/api/audio/list');
   let h='';
   if(d.files && d.files.length>0) {
@@ -643,7 +650,7 @@ async function loadMusicList() {
       h+='<button class="sm '+(isCurrentPlaying?'red':'green')+'" id="btn_play_'+i+'" onclick=\'playToggle('+ej+','+i+')\'>'+(isCurrentPlaying?'■':'▶')+'</button>';
       h+='</div>';
     });
-  } else h='<div style="color:#666;padding:8px">No AAC/WAV/MP3 files</div>';
+  } else h='<div style="color:#666;padding:8px">No audio files</div>';
   document.getElementById('music-list').innerHTML=h;
 }
 var s_currentPlaying='', s_currentIdx=-1;
@@ -660,6 +667,7 @@ async function playToggle(fn,idx) {
       await apiGet('/api/audio/stop');
       var oldBtn=document.getElementById('btn_play_'+s_currentIdx);
       if(oldBtn){oldBtn.textContent='▶';oldBtn.className='sm green'}
+      s_currentPlaying=''; s_currentIdx=-1;
     }
     document.getElementById('play-status').textContent='Loading...';
     document.getElementById('play-status').style.color='#aaa';
@@ -1227,6 +1235,7 @@ static esp_err_t _api_sdcard_info(httpd_req_t *req) {
 
 /* GET /api/audio/record_start */
 static esp_err_t _api_rec_start(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     audio_lock();
     if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK; }
     if (s_fm_busy) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"File manager busy\"}"); return ESP_OK; }
@@ -1331,6 +1340,7 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
 
 /* GET /api/audio/record_stop */
 static esp_err_t _api_rec_stop(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     audio_lock();
     if (!s_is_recording) {
         _stop_audio_task_if_running();
@@ -1374,6 +1384,7 @@ static esp_err_t _api_rec_stop(httpd_req_t *req) {
 
 /* GET /api/audio/record_status */
 static esp_err_t _api_rec_status(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     char r[256];
     if (s_is_recording) {
         audio_lock();
@@ -1409,6 +1420,7 @@ static esp_err_t _api_audio_list(httpd_req_t *req) {
 
 /* GET /api/audio/play?file=xxx.wav */
 static esp_err_t _api_play(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     audio_lock();
     if (!AudioDriver::instance().available()) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio not available\"}"); return ESP_OK; }
     char q[256] = {}, fn[128] = {};
@@ -1446,10 +1458,26 @@ static esp_err_t _api_play(httpd_req_t *req) {
 
 /* GET /api/audio/stop */
 static esp_err_t _api_stop(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     audio_lock();
-    if (s_asp) { esp_audio_simple_player_stop(s_asp); s_playing = false; }
+    if (s_asp) {
+        esp_audio_simple_player_stop(s_asp);
+        esp_audio_simple_player_destroy(s_asp);
+        s_asp = NULL;
+        s_playing = false;
+    }
     audio_unlock();
     httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
+}
+
+/* GET /api/audio/play_status */
+static esp_err_t _api_play_status(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
+    bool playing = s_playing.load(std::memory_order_acquire);
+    char r[64];
+    snprintf(r, sizeof(r), "{\"playing\":%s}", playing ? "true" : "false");
+    httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
 }
 
 /* ── File Manager Handlers ── */
@@ -1571,6 +1599,7 @@ static esp_err_t _api_files_download(httpd_req_t *req) {
 
 /* POST /api/files/delete — body: {"path": "xxx"} */
 static esp_err_t _api_files_delete(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     if (!SDCardDriver::instance().available()) { httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK; }
     audio_lock();
     if (s_is_recording || s_playing) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio is active\"}"); return ESP_OK; }
@@ -1601,6 +1630,7 @@ static esp_err_t _api_files_delete(httpd_req_t *req) {
 
 /* POST /api/files/delete_batch — body: {"paths": ["xxx", "yyy"]} */
 static esp_err_t _api_files_delete_batch(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     if (!SDCardDriver::instance().available()) { httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK; }
     audio_lock();
     if (s_is_recording || s_playing) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio is active\"}"); return ESP_OK; }
@@ -1735,6 +1765,8 @@ static void _register_handlers(httpd_handle_t server) {
     httpd_register_uri_handler(server, &uri);
     uri.uri = "/api/audio/play"; uri.method = HTTP_GET; uri.handler = _api_play;
     httpd_register_uri_handler(server, &uri);
+    uri.uri = "/api/audio/play_status"; uri.method = HTTP_GET; uri.handler = _api_play_status;
+    httpd_register_uri_handler(server, &uri);
     uri.uri = "/api/audio/stop"; uri.method = HTTP_GET; uri.handler = _api_stop;
     httpd_register_uri_handler(server, &uri);
 
@@ -1760,7 +1792,7 @@ static void _register_handlers(httpd_handle_t server) {
     uri.uri = "/api/sdcard/info"; uri.method = HTTP_GET; uri.handler = _api_sdcard_info;
     httpd_register_uri_handler(server, &uri);
 
-    ESP_LOGI(TAG, "HTTP handlers registered (%d endpoints)", 24);
+    ESP_LOGI(TAG, "HTTP handlers registered (%d endpoints)", 25);
 }
 
 /* ── mDNS ────────────────────────────────────────────────────────── */

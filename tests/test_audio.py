@@ -150,16 +150,18 @@ class TestAudioList:
         assert "files" in data
         assert isinstance(data["files"], list)
 
-    def test_audio_list_has_mp3_after_record(self, api):
-        """After recording, list contains .mp3 entry."""
+    def test_audio_list_has_recording_after_record(self, api):
+        """After recording, list contains audio file entry."""
         api.record_start()
         time.sleep(RECORD_SECONDS)
         api.record_stop()
         time.sleep(0.5)
         data = api.audio_list()
-        mp3 = [f for f in data["files"] if f.lower().endswith(".mp3")]
-        assert len(mp3) > 0, f"No .mp3 in list: {data['files']}"
-        pytest.latest_recording = mp3[-1]
+        audio = [f for f in data["files"] if f.lower().endswith((".aac", ".wav", ".mp3"))]
+        assert len(audio) > 0, f"No audio files in list: {data['files']}"
+        aac = [f for f in data["files"] if f.lower().endswith(".aac")]
+        assert len(aac) > 0, f"No .aac in list: {data['files']}"
+        pytest.latest_recording = aac[-1]
 
 
 class TestAudioPlay:
@@ -172,15 +174,15 @@ class TestAudioPlay:
             data = api.audio_list()
         except Exception:
             data = {"files": []}
-        mp3 = [f for f in data["files"] if f.lower().endswith(".mp3")]
-        if not mp3:
+        audio = [f for f in data["files"] if f.lower().endswith((".wav", ".mp3", ".aac"))]
+        if not audio:
             api.record_start()
             time.sleep(RECORD_SECONDS)
             api.record_stop()
             time.sleep(0.5)
             data = api.audio_list()
-            mp3 = [f for f in data["files"] if f.lower().endswith(".mp3")]
-        pytest.latest_recording = mp3[-1] if mp3 else None
+            audio = [f for f in data["files"] if f.lower().endswith((".wav", ".mp3", ".aac"))]
+        pytest.latest_recording = audio[-1] if audio else None
 
     def test_play_returns_ok(self, api):
         """play with valid file returns {ok: 1}."""
@@ -197,9 +199,23 @@ class TestAudioPlay:
             pytest.skip("No recording available")
         r = api.audio_play(pytest.latest_recording)
         assert r.get("ok") in (1, True)
-        time.sleep(PLAY_SECONDS)
+        time.sleep(1)
+        # Verify playing state is true
+        status = api.play_status()
+        assert status.get("playing") is True, f"Expected playing=true: {status}"
         r = api.audio_stop()
         assert r.get("ok") in (1, True)
+        time.sleep(0.5)
+        # Verify playing state is false after stop
+        status = api.play_status()
+        assert status.get("playing") is False, f"Expected playing=false after stop: {status}"
+
+    def test_play_status_when_idle(self, api):
+        """play_status returns {playing: false} when idle."""
+        api.audio_stop()  # Ensure stopped
+        status = api.play_status()
+        assert "playing" in status, f"Missing playing field: {status}"
+        assert status["playing"] is False, f"Expected playing=false: {status}"
 
     def test_play_without_file_returns_ok_0(self, api, client, base_url):
         """play without ?file= param returns {ok: 0}."""
@@ -219,8 +235,11 @@ class TestAudioPlay:
         The firmware's esp_audio_simple_player_run is asynchronous;
         it may return ok:0 or ok:1 (failure is async via callback).
         """
-        r = api.audio_play("nonexistent_abc123.mp3")
+        r = api.audio_play("nonexistent_abc123.aac")
         assert "ok" in r, f"Response missing 'ok' key: {r}"
+        # Clean up: stop any leftover player handle
+        time.sleep(1)
+        api.audio_stop()
 
 
 class TestAudioCleanup:
