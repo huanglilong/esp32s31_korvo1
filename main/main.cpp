@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 #include <sys/stat.h>
 #include "sdkconfig.h"
 #include "esp_log.h"
@@ -136,7 +137,7 @@ static void _build_camera_config() {
 }
 
 /* ── Shared mDNS (reference-counted) ──────────────────────────────── */
-static SemaphoreHandle_t s_mdns_mutex = NULL;
+static std::atomic<SemaphoreHandle_t> s_mdns_mutex_atomic{nullptr};
 static int  s_mdns_refcount = 0;
 static bool s_mdns_initialized = false;
 
@@ -162,13 +163,19 @@ static void _build_mdns_hostname() {
 
 static SemaphoreHandle_t _mdns_mutex_get(void)
 {
-    return s_mdns_mutex;
+    return s_mdns_mutex_atomic.load(std::memory_order_acquire);
 }
 
 void shared_mdns_mutex_init(void)
 {
-    if (!s_mdns_mutex) {
-        s_mdns_mutex = xSemaphoreCreateMutex();
+    /* CAS prevents double-creation race (same pattern as s_tz_mutex_atomic) */
+    if (!s_mdns_mutex_atomic.load(std::memory_order_acquire)) {
+        SemaphoreHandle_t new_mtx = xSemaphoreCreateMutex();
+        SemaphoreHandle_t expected = nullptr;
+        if (!s_mdns_mutex_atomic.compare_exchange_strong(expected, new_mtx,
+                std::memory_order_release, std::memory_order_acquire)) {
+            vSemaphoreDelete(new_mtx);  /* Another thread beat us — free duplicate */
+        }
     }
 }
 
