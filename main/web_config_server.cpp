@@ -942,8 +942,7 @@ static esp_err_t _api_wifi_connect(httpd_req_t *req) {
     const char *ssid = ssid_item ? ssid_item->valuestring : nullptr;
     const char *pass = pass_item ? pass_item->valuestring : nullptr;
 
-    ESP_LOGW(TAG, "WiFi connect request: ssid='%s' pass_len=%u",
-             ssid ? ssid : "(null)", (unsigned)(pass ? strlen(pass) : 0));
+    ESP_LOGI(TAG, "WiFi connect request: ssid='%s'", ssid ? ssid : "(null)");
 
     cJSON *resp = cJSON_CreateObject();
     if (!ssid) {
