@@ -83,7 +83,7 @@ static std::atomic<bool>  s_is_recording{false};
 static esp_audio_enc_handle_t s_encoder = nullptr;
 static uint8_t       *s_enc_in_buf = NULL;    /* PCM accumulation buffer (encoder input) */
 static int            s_enc_in_size = 0;       /* Required input frame size (bytes) */
-static int            s_enc_in_count = 0;      /* Accumulated PCM bytes */
+static std::atomic<int> s_enc_in_count{0};    /* Accumulated PCM bytes (cross-task: written by audio_task, reset by API handler before task start) */
 static uint8_t       *s_enc_out_buf = NULL;   /* Encoder output buffer */
 static int            s_enc_out_size = 0;      /* Output buffer size */
 static FILE          *s_rec_file = NULL;
@@ -140,14 +140,15 @@ static void audio_task(void *arg)
             const uint8_t *src = (const uint8_t*)buf;
             int remaining = n;
             while (remaining > 0) {
-                int space = s_enc_in_size - s_enc_in_count;
+                int count = s_enc_in_count.load(std::memory_order_relaxed);
+                int space = s_enc_in_size - count;
                 int copy = (remaining < space) ? remaining : space;
-                memcpy(s_enc_in_buf + s_enc_in_count, src, copy);
-                s_enc_in_count += copy;
+                memcpy(s_enc_in_buf + count, src, copy);
+                s_enc_in_count.store(count + copy, std::memory_order_relaxed);
                 src += copy;
                 remaining -= copy;
 
-                if (s_enc_in_count >= s_enc_in_size) {
+                if (s_enc_in_count.load(std::memory_order_relaxed) >= s_enc_in_size) {
                     esp_audio_enc_in_frame_t in_frame = {
                         .buffer = s_enc_in_buf, .len = (uint32_t)s_enc_in_size
                     };
@@ -159,7 +160,7 @@ static void audio_task(void *arg)
                         size_t wr = fwrite(out_frame.buffer, 1, out_frame.encoded_bytes, s_rec_file);
                         s_rec_bytes.fetch_add((uint32_t)wr, std::memory_order_relaxed);
                     }
-                    s_enc_in_count = 0;
+                    s_enc_in_count.store(0, std::memory_order_relaxed);
                 }
             }
         }
