@@ -82,16 +82,16 @@
 
 ---
 
-## 4. Build, Flash & Monitor
+## 4. Build, Flash, Monitor & Test
 
 ### 4.1 Quick Commands
 
 ```bash
 source ~/.espressif/v6.x/esp-idf/export.sh            # Setup environment (once per shell)
 idf.py set-target esp32s31                            # Set target chip (once)
+idf.py fullclean                                      # Full clean (only when config changed)
 idf.py build                                          # Build
 idf.py flash monitor                                  # Flash + monitor serial output
-idf.py fullclean                                      # Full clean (only when config changed)
 # In another terminal (same source), once device connects to WiFi:
 pytest tests --base-url=http://esp-web.local:8080 -v  # Run tests (requires device + WiFi)
 ```
@@ -145,6 +145,7 @@ See [esp32_debug_workflow.md](.github/esp32_debug_workflow.md) for full document
 4. If issues remain after 2 rounds, report to user
 5. Update all relevant `*.md` docs
 6. Flash to device and monitor logs to verify
+7. After all issues resolved, run **Build, Flash, Monitor & Test** to verify functionality
 
 ---
 
