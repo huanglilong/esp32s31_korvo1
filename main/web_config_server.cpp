@@ -1113,6 +1113,12 @@ static esp_err_t _api_timezone_get(httpd_req_t *req) {
 
 /* POST /api/system/timezone — body: {"timezone": "CST-8"} */
 static esp_err_t _api_timezone_set(httpd_req_t *req) {
+    /* Validate Content-Length to prevent buffer overflow */
+    if (req->content_len > 127) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
+        return ESP_FAIL;
+    }
+
     char buf[128] = {};
     int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (received <= 0) {
@@ -1192,6 +1198,12 @@ static esp_err_t _api_system_stats(httpd_req_t *req) {
 
 /* POST /api/audio/volume — ?save=false skips NVS write for real-time slider */
 static esp_err_t _api_audio_volume_set(httpd_req_t *req) {
+    /* Validate Content-Length to prevent buffer overflow */
+    if (req->content_len > 127) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
+        return ESP_FAIL;
+    }
+
     char buf[128];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -1721,6 +1733,13 @@ static esp_err_t _api_files_download(httpd_req_t *req) {
 static esp_err_t _api_files_delete(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     if (!SDCardDriver::instance().available()) { httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK; }
+
+    /* Validate Content-Length to prevent buffer overflow */
+    if (req->content_len > 511) {
+        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Body too large\"}");
+        return ESP_OK;
+    }
+
     audio_lock();
     if (s_is_recording || s_playing) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio is active\"}"); return ESP_OK; }
     s_fm_busy = true; audio_unlock();
