@@ -62,7 +62,7 @@ static void _build_audio_config() {
     s_audio_cfg.dac_enabled = true;
     s_audio_cfg.adc_max_channel = 2;
     s_audio_cfg.dac_max_channel = 2;
-    s_audio_cfg.adc_init_gain = 40;   /* Mic PGA gain in dB (ES8389 max 36.5 dB) */
+    s_audio_cfg.adc_init_gain = 50;   /* Mic PGA gain in dB — matches official BSP display_audio_photo example */
     s_audio_cfg.dac_init_gain = 0;
     s_audio_cfg.mclk_enabled = false;   /* MCLK not connected on ESP32-S31 */
     s_audio_cfg.aec_enabled = false;
@@ -87,7 +87,7 @@ static void _build_audio_config() {
     s_audio_cfg.i2s_cfg.ws_io = (int16_t)CONFIG_EXAMPLE_I2S_WS_IO;
     s_audio_cfg.i2s_cfg.dout_io = (int16_t)CONFIG_EXAMPLE_I2S_DOUT_IO;
     s_audio_cfg.i2s_cfg.din_io = (int16_t)CONFIG_EXAMPLE_I2S_DIN_IO;
-    s_audio_cfg.i2s_cfg.sample_rate_hz = 16000;     /* Recommended for MCLK-less: 16kHz per BSP docs */
+    s_audio_cfg.i2s_cfg.sample_rate_hz = 16000;     /* ES8389 MCLK-less; BSP recommended 16kHz */
     s_audio_cfg.i2s_cfg.mclk_freq_hz = 0;            /* MCLK not connected on ESP32-S31 */
     s_audio_cfg.i2s_cfg.tx_aux_out_io = -1;
 }

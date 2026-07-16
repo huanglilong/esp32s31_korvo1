@@ -119,8 +119,8 @@
 ### Software Features
 
 - **Audio Pipeline**: 双模拟麦克风 → ES8389 ADC → I2S → ESP32-S31 处理 → I2S → ES8389 DAC → NS4150B PA → 扬声器
-  - > ⚠️ MCLK 不可用，推荐采样率 **16kHz**
-- **Audio Driver**: ES8389 立体声编解码器驱动, 使用 `esp_codec_dev` API, I2S 16kHz 16-bit 双工 (MCLK-less), 硬件音量控制 + PGA mic gain (40dB), AAC/ADTS 录音, uORB 音量状态发布
+  - > ⚠️ MCLK 不可用，采样率 **16kHz** (BSP 官方推荐)。**改了 `sdkconfig.defaults` 必须 `idf.py fullclean && idf.py build` 否则 sdkconfig 不会更新！**
+- **Audio Driver**: ES8389 立体声编解码器驱动, 使用 `esp_codec_dev` API, I2S 48kHz 16-bit 双工 (MCLK-less), 硬件音量控制 + PGA mic gain (50dB), AAC/ADTS 录音, uORB 音量状态发布
 - **SD Card**: SDIO 3.0 4-bit 模式, FATFS 文件系统, boot 时自动挂载
 - **Camera**: DVP OV3660 摄像头驱动 (optional, mutex 互斥控制), Camera App LCD 实时预览 (V4L2 + LVGL canvas)
 - **WiFi**: 内置 Wi-Fi 6 STA + SoftAP 模式, NVS 凭证持久化, SNTP 时间同步

@@ -62,6 +62,12 @@ esp_err_t AudioDriver::_init_bsp_audio(const dev_audio_codec_config_t *cfg) {
     dev_audio_codec_handles_t *h = _handles.load(std::memory_order_acquire);
     if (!h || !cfg) return ESP_ERR_INVALID_STATE;
 
+    /* Let BSP handle I2S initialization via bsp_audio_codec_speaker_init() /
+     * bsp_audio_codec_microphone_init(), exactly matching the official
+     * display_audio_photo example pattern. BSP defaults to 22050 Hz internally;
+     * esp_codec_dev_open() below will reconfigure to the actual sample rate
+     * via i2s_channel_reconfig_std_clock() + es8389_config_sample(). */
+
     esp_codec_dev_handle_t speaker_dev = nullptr;
     esp_codec_dev_handle_t mic_dev = nullptr;
 
@@ -78,6 +84,7 @@ esp_err_t AudioDriver::_init_bsp_audio(const dev_audio_codec_config_t *cfg) {
             .bits_per_sample = 16,
             .channel = cfg->dac_max_channel,
             .sample_rate = cfg->i2s_cfg.sample_rate_hz,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_384,
         };
         if (esp_codec_dev_open(speaker_dev, &spk_fs) != ESP_CODEC_DEV_OK) {
             ESP_LOGW(TAG, "Speaker open returned non-OK");
@@ -103,6 +110,7 @@ esp_err_t AudioDriver::_init_bsp_audio(const dev_audio_codec_config_t *cfg) {
             .bits_per_sample = 16,
             .channel = cfg->adc_max_channel,
             .sample_rate = cfg->i2s_cfg.sample_rate_hz,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_384,
         };
         if (esp_codec_dev_open(mic_dev, &fs) != ESP_CODEC_DEV_OK) {
             ESP_LOGW(TAG, "Mic open returned non-OK");

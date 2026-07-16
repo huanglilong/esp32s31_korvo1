@@ -18,7 +18,7 @@
  * Hardware: ES8389 stereo codec (I2S duplex + I2C control).
  *   - Dual analog mic input → ADC → I2S RX
  *   - I2S TX → DAC → NS4150B PA → Speakers
- *   - ⚠️ MCLK (GPIO42) NOT connected → BCLK as master clock, 22kHz sample rate
+ *   - ⚠️ MCLK (GPIO42) NOT connected → BCLK as master clock, 48kHz sample rate
  *
  * BSP reference: espressif/esp32_s31_korvo_1 v1.0.0~1
  *   - bsp_audio_init() → I2S duplex (TX+RX)
@@ -90,8 +90,6 @@ typedef struct {
     const void                  *ctrl_if;     /*!< Control interface handle (opaque) */
     const void                  *gpio_if;     /*!< GPIO interface handle (opaque) */
     const void                  *codec_if;    /*!< Codec interface (ES8389, opaque) */
-    i2s_chan_handle_t            tx_handle;   /*!< I2S TX channel handle */
-    i2s_chan_handle_t            rx_handle;   /*!< I2S RX channel handle */
     void                        *i2c_handle;  /*!< I2C bus handle (opaque) */
 } dev_audio_codec_handles_t;
 

@@ -229,7 +229,9 @@ static void _url_decode(char *s) {
     *w = '\0';
 }
 
-/* Playback output callback — writes to codec DAC */
+/* Playback output callback — writes to codec DAC via esp_codec_dev.
+ * Same pattern as esp32p4_monitor._asp_output_cb: call esp_codec_dev_write()
+ * which internally writes to the I2S TX channel managed by BSP/esp_codec_dev. */
 static int _asp_out(uint8_t *d, int sz, void *_) {
     (void)_;
     return AudioDriver::instance().codec_write(d, sz);
@@ -1334,7 +1336,7 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
     aac_cfg.sample_rate = 16000;
     aac_cfg.channel = 2;
     aac_cfg.bits_per_sample = 16;
-    aac_cfg.bitrate = 64000;
+    aac_cfg.bitrate = 64000;   /* 64kbps — suitable for 16kHz stereo AAC */
     aac_cfg.adts_used = true;
 
     esp_audio_enc_config_t enc_cfg = {};

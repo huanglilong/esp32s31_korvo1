@@ -29,21 +29,19 @@ extern "C" {
 #define WIFI_CONNECTED_BIT            BIT0
 
 /* ── Audio I2S ──────────────────────────────────────────────────── */
-/* NOTE: Actual sample rate is 16kHz (MCLK-less mode on ESP32-S31).
- * These macros are kept for backward compatibility but unused. */
-#define EXAMPLE_AUDIO_SAMPLE_RATE     (16000)
-#define EXAMPLE_AUDIO_MCLK_FREQ_HZ    (0)  /* MCLK not connected on ESP32-S31 */
+#define EXAMPLE_AUDIO_SAMPLE_RATE     (16000)   /* ES8389 MCLK-less; BSP recommended 16kHz */
+#define EXAMPLE_AUDIO_MCLK_FREQ_HZ    (0)       /* MCLK not connected on ESP32-S31 */
 #define EXAMPLE_VOICE_VOLUME          CONFIG_EXAMPLE_VOICE_VOLUME
 
 /* ── Audio I2C ──────────────────────────────────────────────────── */
-#define AUDIO_I2C_NUM         (0)
+#define AUDIO_I2C_NUM         (CONFIG_BSP_I2C_NUM)  /* Match BSP Kconfig default (1) */
 #define AUDIO_I2C_SCL_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2C_SCL_IO)
 #define AUDIO_I2C_SDA_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2C_SDA_IO)
 #define AUDIO_I2C_ADDR        (0x20)   /* ES8389 I2C address (8-bit, esp_codec_dev right-shifts to 7-bit 0x10) */
 #define AUDIO_I2C_FREQ        (100000) /* 100 kHz — BSP default */
 
 /* ── Audio I2S Pinout ──────────────────────────────────────────── */
-#define AUDIO_I2S_NUM         (0)
+#define AUDIO_I2S_NUM         (CONFIG_BSP_I2S_NUM)  /* Match BSP Kconfig default (1) */
 #define AUDIO_I2S_MCK_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2S_MCLK_IO)
 #define AUDIO_I2S_BCK_IO      static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2S_BCLK_IO)
 #define AUDIO_I2S_WS_IO       static_cast<gpio_num_t>(CONFIG_EXAMPLE_I2S_WS_IO)
