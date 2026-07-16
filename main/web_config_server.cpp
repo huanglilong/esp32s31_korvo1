@@ -1315,12 +1315,12 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
 
     if (esp_audio_enc_open(&enc_cfg, &s_encoder) != ESP_AUDIO_ERR_OK || !s_encoder) {
         ESP_LOGE(TAG, "AAC encoder open failed");
-        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
     }
     if (esp_audio_enc_get_frame_size(s_encoder, &s_enc_in_size, &s_enc_out_size) != ESP_AUDIO_ERR_OK || s_enc_in_size <= 0) {
         ESP_LOGE(TAG, "AAC get_frame_size failed");
         esp_audio_enc_close(s_encoder); s_encoder = nullptr;
-        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
     }
     ESP_LOGI(TAG, "AAC encoder: in=%d out=%d", s_enc_in_size, s_enc_out_size);
 
@@ -1329,7 +1329,7 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
     if (!s_enc_in_buf || !s_enc_out_buf) {
         ESP_LOGE(TAG, "Encoder buffer alloc failed");
         esp_audio_enc_close(s_encoder); s_encoder = nullptr;
-        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
     }
     s_enc_in_count = 0;
 
@@ -1351,7 +1351,7 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
         esp_audio_enc_close(s_encoder); s_encoder = nullptr;
         heap_caps_free(s_enc_in_buf); s_enc_in_buf = NULL;
         heap_caps_free(s_enc_out_buf); s_enc_out_buf = NULL;
-        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
     }
 
     s_rec_bytes = 0;
