@@ -58,6 +58,9 @@
 
 /* Audio recording / playback */
 #include "esp_audio_simple_player.h"
+#include "esp_audio_enc.h"
+#include "esp_audio_enc_default.h"
+#include "esp_aac_enc.h"
 
 static const char *TAG = "web_config";
 
@@ -68,17 +71,23 @@ static httpd_handle_t s_httpd = nullptr;
 #define REC_BUF_SAMPLES      480
 #define REC_BUF_BYTES        (REC_BUF_SAMPLES * 2 * sizeof(int16_t))
 
-/* WAV header: 44 bytes + PCM data.
- * WAV format uses little-endian, same as ESP32-S31 (RISC-V). */
+/* AAC encoder: codec ADC → AAC (ADTS) → SD card (.aac file).
+ * Uses esp_audio_enc official API with adts_used=true.
+ * esp_audio_simple_player supports AAC playback natively. */
 
 static std::atomic<TaskHandle_t> s_audio_task{nullptr};
 static StackType_t   *s_audio_stack = NULL;
 static StaticTask_t  *s_audio_tcb = NULL;
 static std::atomic<bool>  s_audio_running{false};
 static std::atomic<bool>  s_is_recording{false};
+static esp_audio_enc_handle_t s_encoder = nullptr;
+static uint8_t       *s_enc_in_buf = NULL;    /* PCM accumulation buffer (encoder input) */
+static int            s_enc_in_size = 0;       /* Required input frame size (bytes) */
+static int            s_enc_in_count = 0;      /* Accumulated PCM bytes */
+static uint8_t       *s_enc_out_buf = NULL;   /* Encoder output buffer */
+static int            s_enc_out_size = 0;      /* Output buffer size */
 static FILE          *s_rec_file = NULL;
 static std::atomic<uint32_t> s_rec_bytes{0};
-static std::atomic<uint32_t> s_rec_data_bytes{0};  /* PCM payload only, for WAV header update */
 static std::atomic<uint32_t> s_rec_start_ms{0};
 static char           s_rec_path[128];
 
@@ -116,9 +125,7 @@ static void _stop_audio_task_if_running(void)
     if (s_audio_stack) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; }
 }
 
-/* Audio recording task: codec ADC → PCM WAV → SD card.
- * Writes a temporary WAV header first, then appends raw PCM data.
- * On stop, seeks back to patch header with final file size. */
+/* Audio recording task: codec ADC → AAC (ADTS) → SD card */
 static void audio_task(void *arg)
 {
     (void)arg;
@@ -128,10 +135,32 @@ static void audio_task(void *arg)
         int n = AudioDriver::instance().codec_read((uint8_t*)buf, REC_BUF_BYTES);
         if (n <= 0) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
 
-        if (s_is_recording && s_rec_file) {
-            size_t written = fwrite(buf, 1, (size_t)n, s_rec_file);
-            s_rec_bytes.fetch_add((uint32_t)written, std::memory_order_relaxed);
-            s_rec_data_bytes.fetch_add((uint32_t)written, std::memory_order_relaxed);
+        if (s_is_recording && s_encoder && s_enc_in_buf && s_enc_out_buf) {
+            const uint8_t *src = (const uint8_t*)buf;
+            int remaining = n;
+            while (remaining > 0) {
+                int space = s_enc_in_size - s_enc_in_count;
+                int copy = (remaining < space) ? remaining : space;
+                memcpy(s_enc_in_buf + s_enc_in_count, src, copy);
+                s_enc_in_count += copy;
+                src += copy;
+                remaining -= copy;
+
+                if (s_enc_in_count >= s_enc_in_size) {
+                    esp_audio_enc_in_frame_t in_frame = {
+                        .buffer = s_enc_in_buf, .len = (uint32_t)s_enc_in_size
+                    };
+                    esp_audio_enc_out_frame_t out_frame = {
+                        .buffer = s_enc_out_buf, .len = (uint32_t)s_enc_out_size
+                    };
+                    if (esp_audio_enc_process(s_encoder, &in_frame, &out_frame) == ESP_AUDIO_ERR_OK
+                        && out_frame.encoded_bytes > 0 && s_rec_file) {
+                        size_t wr = fwrite(out_frame.buffer, 1, out_frame.encoded_bytes, s_rec_file);
+                        s_rec_bytes.fetch_add((uint32_t)wr, std::memory_order_relaxed);
+                    }
+                    s_enc_in_count = 0;
+                }
+            }
         }
     }
     heap_caps_free(buf);
@@ -614,7 +643,7 @@ async function loadMusicList() {
       h+='<button class="sm '+(isCurrentPlaying?'red':'green')+'" id="btn_play_'+i+'" onclick=\'playToggle('+ej+','+i+')\'>'+(isCurrentPlaying?'■':'▶')+'</button>';
       h+='</div>';
     });
-  } else h='<div style="color:#666;padding:8px">No WAV/MP3 files</div>';
+  } else h='<div style="color:#666;padding:8px">No AAC/WAV/MP3 files</div>';
   document.getElementById('music-list').innerHTML=h;
 }
 var s_currentPlaying='', s_currentIdx=-1;
@@ -1196,60 +1225,6 @@ static esp_err_t _api_sdcard_info(httpd_req_t *req) {
 
 /* ── Audio Recording / Playback / File Manager / ULog handlers ── */
 
-/* Write a 44-byte WAV header for 16-bit PCM stereo.
- * WAV format is little-endian (native on ESP32-S31 RISC-V).
- * Returns 0 on success, -1 on failure. */
-static int _wav_write_header(FILE *f, uint32_t data_size) {
-    if (!f) return -1;
-    uint32_t sample_rate = 16000;
-    uint16_t channels = 2;
-    uint16_t bits_per_sample = 16;
-    uint32_t byte_rate = sample_rate * channels * bits_per_sample / 8;
-    uint16_t block_align = channels * bits_per_sample / 8;
-    uint32_t riff_size = 36 + data_size;
-
-    uint8_t hdr[44];
-    memset(hdr, 0, sizeof(hdr));
-    /* RIFF header */
-    hdr[0] = 'R'; hdr[1] = 'I'; hdr[2] = 'F'; hdr[3] = 'F';
-    hdr[4] = (uint8_t)(riff_size); hdr[5] = (uint8_t)(riff_size >> 8);
-    hdr[6] = (uint8_t)(riff_size >> 16); hdr[7] = (uint8_t)(riff_size >> 24);
-    hdr[8] = 'W'; hdr[9] = 'A'; hdr[10] = 'V'; hdr[11] = 'E';
-    /* fmt chunk */
-    hdr[12] = 'f'; hdr[13] = 'm'; hdr[14] = 't'; hdr[15] = ' ';
-    hdr[16] = 16; hdr[17] = 0; hdr[18] = 0; hdr[19] = 0;  /* Subchunk1Size = 16 */
-    hdr[20] = 1;  hdr[21] = 0;                             /* AudioFormat = 1 (PCM) */
-    hdr[22] = (uint8_t)(channels); hdr[23] = (uint8_t)(channels >> 8);
-    hdr[24] = (uint8_t)(sample_rate); hdr[25] = (uint8_t)(sample_rate >> 8);
-    hdr[26] = (uint8_t)(sample_rate >> 16); hdr[27] = (uint8_t)(sample_rate >> 24);
-    hdr[28] = (uint8_t)(byte_rate); hdr[29] = (uint8_t)(byte_rate >> 8);
-    hdr[30] = (uint8_t)(byte_rate >> 16); hdr[31] = (uint8_t)(byte_rate >> 24);
-    hdr[32] = (uint8_t)(block_align); hdr[33] = (uint8_t)(block_align >> 8);
-    hdr[34] = (uint8_t)(bits_per_sample); hdr[35] = (uint8_t)(bits_per_sample >> 8);
-    /* data chunk */
-    hdr[36] = 'd'; hdr[37] = 'a'; hdr[38] = 't'; hdr[39] = 'a';
-    hdr[40] = (uint8_t)(data_size); hdr[41] = (uint8_t)(data_size >> 8);
-    hdr[42] = (uint8_t)(data_size >> 16); hdr[43] = (uint8_t)(data_size >> 24);
-    return fwrite(hdr, 1, 44, f) == 44 ? 0 : -1;
-}
-
-/* Patch WAV header with final data size (seeks back to byte 4 and 40). */
-static int _wav_patch_header(FILE *f, uint32_t data_size) {
-    if (!f) return -1;
-    uint32_t riff_size = 36 + data_size;
-    /* Patch RIFF size at offset 4 */
-    if (fseek(f, 4, SEEK_SET) != 0) return -1;
-    uint8_t buf[4];
-    buf[0] = (uint8_t)(riff_size); buf[1] = (uint8_t)(riff_size >> 8);
-    buf[2] = (uint8_t)(riff_size >> 16); buf[3] = (uint8_t)(riff_size >> 24);
-    if (fwrite(buf, 1, 4, f) != 4) return -1;
-    /* Patch data size at offset 40 */
-    buf[0] = (uint8_t)(data_size); buf[1] = (uint8_t)(data_size >> 8);
-    buf[2] = (uint8_t)(data_size >> 16); buf[3] = (uint8_t)(data_size >> 24);
-    if (fseek(f, 40, SEEK_SET) != 0) return -1;
-    return fwrite(buf, 1, 4, f) == 4 ? 0 : -1;
-}
-
 /* GET /api/audio/record_start */
 static esp_err_t _api_rec_start(httpd_req_t *req) {
     audio_lock();
@@ -1273,39 +1248,63 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
         if (!h) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
     }
 
-    /* Set microphone PGA gain (ES8389 max hardware gain is 36.5 dB) */
-    AudioDriver::instance().set_mic_gain(40);
+    /* Register and open AAC encoder */
+    esp_audio_enc_register_default();
 
-    /* Generate WAV filename with wall-clock timestamp if available */
+    esp_aac_enc_config_t aac_cfg = ESP_AAC_ENC_CONFIG_DEFAULT();
+    aac_cfg.sample_rate = 16000;
+    aac_cfg.channel = 2;
+    aac_cfg.bits_per_sample = 16;
+    aac_cfg.bitrate = 64000;
+    aac_cfg.adts_used = true;
+
+    esp_audio_enc_config_t enc_cfg = {};
+    enc_cfg.type = ESP_AUDIO_TYPE_AAC;
+    enc_cfg.cfg = &aac_cfg;
+    enc_cfg.cfg_sz = sizeof(aac_cfg);
+
+    if (esp_audio_enc_open(&enc_cfg, &s_encoder) != ESP_AUDIO_ERR_OK || !s_encoder) {
+        ESP_LOGE(TAG, "AAC encoder open failed");
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
+    }
+    if (esp_audio_enc_get_frame_size(s_encoder, &s_enc_in_size, &s_enc_out_size) != ESP_AUDIO_ERR_OK || s_enc_in_size <= 0) {
+        ESP_LOGE(TAG, "AAC get_frame_size failed");
+        esp_audio_enc_close(s_encoder); s_encoder = nullptr;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
+    }
+    ESP_LOGI(TAG, "AAC encoder: in=%d out=%d", s_enc_in_size, s_enc_out_size);
+
+    s_enc_in_buf = (uint8_t*)heap_caps_calloc(1, s_enc_in_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_enc_out_buf = (uint8_t*)heap_caps_calloc(1, s_enc_out_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_enc_in_buf || !s_enc_out_buf) {
+        ESP_LOGE(TAG, "Encoder buffer alloc failed");
+        esp_audio_enc_close(s_encoder); s_encoder = nullptr;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
+    }
+    s_enc_in_count = 0;
+
+    /* Generate .aac filename */
     struct timeval tv; gettimeofday(&tv, NULL);
     time_t t = tv.tv_sec; struct tm tm_buf;
     localtime_r(&t, &tm_buf);
     if (tm_buf.tm_year + 1900 > 2020) {
-        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%04d%02d%02d_%02d%02d%02d.wav",
+        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%04d%02d%02d_%02d%02d%02d.aac",
                  tm_buf.tm_year+1900, tm_buf.tm_mon+1, tm_buf.tm_mday, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec);
     } else {
         uint32_t mono_ms = (uint32_t)(esp_timer_get_time() / 1000);
-        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%lu.wav", (unsigned long)mono_ms);
+        snprintf(s_rec_path, sizeof(s_rec_path), SDMMC_MOUNT_POINT "/rec_%lu.aac", (unsigned long)mono_ms);
     }
 
     s_rec_file = fopen(s_rec_path, "wb");
     if (!s_rec_file) {
-        audio_unlock(); _stop_audio_task_if_running();
-        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Cannot create file\"}");
-        return ESP_OK;
+        ESP_LOGE(TAG, "Cannot create file");
+        esp_audio_enc_close(s_encoder); s_encoder = nullptr;
+        heap_caps_free(s_enc_in_buf); s_enc_in_buf = NULL;
+        heap_caps_free(s_enc_out_buf); s_enc_out_buf = NULL;
+        audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0"); return ESP_OK;
     }
 
-    /* Write initial WAV header with 0 data size (will be patched on stop) */
-    if (_wav_write_header(s_rec_file, 0) != 0) {
-        ESP_LOGE(TAG, "Failed to write WAV header");
-        fclose(s_rec_file); s_rec_file = NULL;
-        audio_unlock(); _stop_audio_task_if_running();
-        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"WAV header write failed\"}");
-        return ESP_OK;
-    }
-
-    s_rec_bytes = 44;  /* Header bytes already written */
-    s_rec_data_bytes = 0;
+    s_rec_bytes = 0;
     s_rec_start_ms.store((uint32_t)(esp_timer_get_time() / 1000), std::memory_order_relaxed);
     s_is_recording = true;
 
@@ -1340,19 +1339,35 @@ static esp_err_t _api_rec_stop(httpd_req_t *req) {
     s_is_recording = false;
     _stop_audio_task_if_running();
 
-    /* Patch WAV header with final data size */
+    /* Close encoder */
     FILE *f = s_rec_file; s_rec_file = NULL;
-    uint32_t data_bytes = s_rec_data_bytes.load(std::memory_order_relaxed);
-    if (f) {
-        _wav_patch_header(f, data_bytes);
-        fclose(f);
+    if (s_encoder) {
+        /* Flush remaining encoder output */
+        if (s_enc_out_buf) {
+            esp_audio_enc_out_frame_t flush_out = {
+                .buffer = s_enc_out_buf, .len = (uint32_t)s_enc_out_size
+            };
+            /* Send empty frame to flush */
+            esp_audio_enc_in_frame_t empty_in = { .buffer = NULL, .len = 0 };
+            esp_audio_enc_process(s_encoder, &empty_in, &flush_out);
+            if (flush_out.encoded_bytes > 0 && f) {
+                fwrite(flush_out.buffer, 1, flush_out.encoded_bytes, f);
+                s_rec_bytes.fetch_add(flush_out.encoded_bytes, std::memory_order_relaxed);
+            }
+        }
+        esp_audio_enc_close(s_encoder); s_encoder = nullptr;
     }
+    if (s_enc_in_buf) { heap_caps_free(s_enc_in_buf); s_enc_in_buf = NULL; }
+    if (s_enc_out_buf) { heap_caps_free(s_enc_out_buf); s_enc_out_buf = NULL; }
+
+    /* Close file */
+    if (f) fclose(f);
 
     char saved[128]; strlcpy(saved, s_rec_path, sizeof(saved));
-    uint32_t total_bytes = 44 + data_bytes;  /* header + payload */
+    uint32_t total_bytes = s_rec_bytes.load(std::memory_order_relaxed);
     audio_unlock();
     char r[256]; snprintf(r, sizeof(r), "{\"ok\":1,\"file\":\"%s\",\"bytes\":%lu}", saved, (unsigned long)total_bytes);
-    ESP_LOGI(TAG, "Saved WAV: %s (%lu bytes total, %lu PCM)", saved, (unsigned long)total_bytes, (unsigned long)data_bytes);
+    ESP_LOGI(TAG, "Saved AAC: %s (%lu)", saved, (unsigned long)total_bytes);
     httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
@@ -1383,7 +1398,7 @@ static esp_err_t _api_audio_list(httpd_req_t *req) {
     cJSON *arr = cJSON_CreateArray();
     if (!root || !arr) { if (d) closedir(d); if (arr) cJSON_Delete(arr); if (root) cJSON_Delete(root); httpd_resp_send_500(req); return ESP_FAIL; }
     cJSON_AddItemToObject(root, "files", arr);
-    if (d) { struct dirent *e; while ((e = readdir(d))) { if (e->d_name[0] == '.') continue; char *x = strrchr(e->d_name, '.'); if (x && (strcasecmp(x, ".wav") == 0 || strcasecmp(x, ".mp3") == 0)) cJSON_AddItemToArray(arr, cJSON_CreateString(e->d_name)); } closedir(d); }
+    if (d) { struct dirent *e; while ((e = readdir(d))) { if (e->d_name[0] == '.') continue; char *x = strrchr(e->d_name, '.'); if (x && (strcasecmp(x, ".aac") == 0 || strcasecmp(x, ".wav") == 0 || strcasecmp(x, ".mp3") == 0)) cJSON_AddItemToArray(arr, cJSON_CreateString(e->d_name)); } closedir(d); }
     char *j = cJSON_PrintUnformatted(root);
     if (!j) { cJSON_Delete(root); httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
