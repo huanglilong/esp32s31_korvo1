@@ -94,6 +94,7 @@ static char           s_rec_path[128];
 /* Playback */
 static esp_asp_handle_t s_asp = NULL;
 static std::atomic<bool>    s_playing{false};
+static char           s_playing_file[128] = {};
 
 /* Mutual exclusion — file manager blocks audio ops during download/delete */
 static std::atomic<bool>    s_fm_busy{false};
@@ -238,8 +239,10 @@ static int _asp_evt(esp_asp_event_pkt_t *pkt, void *_) {
     (void)_;
     if (pkt->type == ESP_ASP_EVENT_TYPE_STATE) {
         int s = *(esp_asp_state_t*)pkt->payload;
-        if (s == ESP_ASP_STATE_FINISHED || s == ESP_ASP_STATE_STOPPED || s == ESP_ASP_STATE_ERROR)
+        if (s == ESP_ASP_STATE_FINISHED || s == ESP_ASP_STATE_STOPPED || s == ESP_ASP_STATE_ERROR) {
+            s_playing_file[0] = '\0';
             s_playing = false;
+        }
     }
     return 0;
 }
@@ -505,7 +508,7 @@ static const char *INDEX_HTML = R"rawliteral(
 
 <script>
 var fmCurrentDir='/';
-var _scanTimer=null, _musicTimer=null, _sysInfoTimer=null, _ulogTimer=null, _recPollTimer=null;
+var _scanTimer=null, _musicTimer=null, _sysInfoTimer=null, _ulogTimer=null, _recTimer=null;
 
 async function apiGet(p) { try { let r=await fetch(p); return await r.json(); } catch(e) { return {error:e.message}; } }
 async function apiPost(p, b) { try { let r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return await r.json(); } catch(e) { return {error:e.message}; } }
@@ -519,10 +522,11 @@ function switchTab(t) {
   if(_musicTimer){clearInterval(_musicTimer);_musicTimer=null}
   if(_sysInfoTimer){clearInterval(_sysInfoTimer);_sysInfoTimer=null}
   if(_ulogTimer){clearInterval(_ulogTimer);_ulogTimer=null}
-  if(t==='wifi'){scanWiFi();_scanTimer=setInterval(scanWiFi,10000)}
-  if(t==='audio'){loadMusicList();_musicTimer=setInterval(loadMusicList,5000)}
+  if(_recTimer){clearInterval(_recTimer);_recTimer=null}
+  if(t==='wifi'){scanWiFi();_scanTimer=setInterval(scanWiFi,5000)}
+  if(t==='audio'){refreshRecStatus();loadMusicList();_recTimer=setInterval(refreshRecStatus,2000);_musicTimer=setInterval(loadMusicList,2000)}
   if(t==='files') loadFileManager('/');
-  if(t==='system'){refreshSysInfo();_sysInfoTimer=setInterval(refreshSysInfo,5000);refreshUlogStatus();_ulogTimer=setInterval(refreshUlogStatus,3000)}
+  if(t==='system'){refreshSysInfo();_sysInfoTimer=setInterval(refreshSysInfo,2000);refreshUlogStatus();_ulogTimer=setInterval(refreshUlogStatus,2000)}
 }
 
 /* ── WiFi: auto-scan + Connect button + password modal ── */
@@ -597,46 +601,62 @@ function onVolumeSlide(v) {
 
 /* ── Audio Recording ── */
 var s_recording=false;
+var _recTimer=null;
+async function refreshRecStatus() {
+  let d=await apiGet('/api/audio/record_status');
+  let wasRecording=s_recording;
+  s_recording=!!d.recording;
+  if(s_recording) {
+    document.getElementById('btn-rec').textContent='■';
+    document.getElementById('btn-rec').className='red';
+    let info='Recording: '+(d.seconds||0)+'s';
+    if(d.file) info+=', file: '+d.file+' ('+Math.round((d.bytes||0)/1024)+' KB)';
+    document.getElementById('rec-status').textContent=info;
+    document.getElementById('rec-status').style.color='#e74c3c';
+  } else {
+    document.getElementById('btn-rec').textContent='▶';
+    document.getElementById('btn-rec').className='green';
+    if(wasRecording && d.file) {
+      document.getElementById('rec-status').textContent='Stopped, file: '+d.file;
+      document.getElementById('rec-status').style.color='#3498db';
+    } else {
+      document.getElementById('rec-status').textContent='Stopped';
+      document.getElementById('rec-status').style.color='#3498db';
+    }
+  }
+}
 async function recToggle() {
   if(s_recording) {
     let d=await apiGet('/api/audio/record_stop');
-    s_recording=false;
-    document.getElementById('btn-rec').textContent='▶';
-    document.getElementById('btn-rec').className='green';
-    let info=d.file?('Stopped, file: '+d.file+' ('+Math.round(d.bytes/1024)+' KB)'):'Stopped';
-    document.getElementById('rec-status').textContent=info;
-    document.getElementById('rec-status').style.color='#3498db';
-    if(_recPollTimer){clearInterval(_recPollTimer);_recPollTimer=null}
+    refreshRecStatus();
   } else {
     let d=await apiGet('/api/audio/record_start');
     if(!d.ok){ document.getElementById('rec-status').innerHTML='<span class="error">'+(d.error||'Failed')+'</span>'; return; }
-    s_recording=true;
-    document.getElementById('btn-rec').textContent='■';
-    document.getElementById('btn-rec').className='red';
-    document.getElementById('rec-status').textContent='Recording';
-    document.getElementById('rec-status').style.color='#e74c3c';
-    _recPollTimer=setInterval(pollRecStatus,1000);
-  }
-}
-async function pollRecStatus() {
-  if(!s_recording) return;
-  let d=await apiGet('/api/audio/record_status');
-  if(d.recording){
-    let info='Recording: '+d.seconds+'s';
-    if(d.file) info+=', file: '+d.file+' ('+Math.round(d.bytes/1024)+' KB)';
-    document.getElementById('rec-status').textContent=info;
+    refreshRecStatus();
   }
 }
 
 /* ── Music Playback (single Start/Stop toggle, auto-refresh list + play_status) ── */
-async function loadMusicList() {
-  /* Poll play_status to sync UI with actual device state */
+var s_currentPlaying='', s_currentIdx=-1;
+async function refreshPlayStatus() {
   let ps=await apiGet('/api/audio/play_status');
-  if(!ps.playing && s_currentPlaying) {
+  if(ps.playing) {
+    /* Sync from server: if file known and different from local, update */
+    if(ps.file && ps.file.length>0 && s_currentPlaying!==ps.file) {
+      s_currentPlaying=ps.file;
+      s_currentIdx=-1; /* idx unknown from server, will resolve in loadMusicList */
+    }
+    document.getElementById('play-status').textContent=s_currentPlaying?('Playing: '+s_currentPlaying):'Playing';
+    document.getElementById('play-status').style.color='#2ecc71';
+  } else if(s_currentPlaying) {
     s_currentPlaying=''; s_currentIdx=-1;
     document.getElementById('play-status').textContent='Stopped';
     document.getElementById('play-status').style.color='#3498db';
   }
+}
+async function loadMusicList() {
+  /* Poll play_status to sync UI with actual device state */
+  await refreshPlayStatus();
   let d=await apiGet('/api/audio/list');
   let h='';
   if(d.files && d.files.length>0) {
@@ -649,25 +669,20 @@ async function loadMusicList() {
       h+='<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+dn+'</span>';
       h+='<button class="sm '+(isCurrentPlaying?'red':'green')+'" id="btn_play_'+i+'" onclick=\'playToggle('+ej+','+i+')\'>'+(isCurrentPlaying?'■':'▶')+'</button>';
       h+='</div>';
+      if(isCurrentPlaying) s_currentIdx=i;
     });
   } else h='<div style="color:#666;padding:8px">No audio files</div>';
   document.getElementById('music-list').innerHTML=h;
 }
-var s_currentPlaying='', s_currentIdx=-1;
 async function playToggle(fn,idx) {
   if(s_currentPlaying===fn) {
     await apiGet('/api/audio/stop');
-    s_currentPlaying=''; s_currentIdx=-1;
-    document.getElementById('play-status').textContent='Stopped';
-    document.getElementById('play-status').style.color='#3498db';
-    var btn=document.getElementById('btn_play_'+idx);
-    if(btn){btn.textContent='▶';btn.className='sm green'}
+    refreshPlayStatus();
+    loadMusicList();
   } else {
     if(s_currentPlaying) {
       await apiGet('/api/audio/stop');
-      var oldBtn=document.getElementById('btn_play_'+s_currentIdx);
-      if(oldBtn){oldBtn.textContent='▶';oldBtn.className='sm green'}
-      s_currentPlaying=''; s_currentIdx=-1;
+      refreshPlayStatus();
     }
     document.getElementById('play-status').textContent='Loading...';
     document.getElementById('play-status').style.color='#aaa';
@@ -676,8 +691,7 @@ async function playToggle(fn,idx) {
       s_currentPlaying=fn; s_currentIdx=idx;
       document.getElementById('play-status').textContent='Playing: '+fn;
       document.getElementById('play-status').style.color='#2ecc71';
-      var btn=document.getElementById('btn_play_'+idx);
-      if(btn){btn.textContent='■';btn.className='sm red'}
+      loadMusicList();
     } else {
       document.getElementById('play-status').textContent='Play failed';
       document.getElementById('play-status').style.color='#e74c3c';
@@ -805,8 +819,11 @@ async function refreshSysInfo() {
     document.getElementById('volume').value=d.volume;
     document.getElementById('volume-val').textContent=d.volume;
   }
+  /* Sync recording and playback state from device on page load */
+  refreshRecStatus();
+  refreshPlayStatus();
   scanWiFi();
-  _scanTimer=setInterval(scanWiFi,10000);
+  _scanTimer=setInterval(scanWiFi,5000);
 })();
 </script>
 </body>
@@ -1435,6 +1452,7 @@ static esp_err_t _api_play(httpd_req_t *req) {
     if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Recording in progress\"}"); return ESP_OK; }
     if (s_asp) {
         esp_asp_handle_t old = s_asp; s_asp = NULL; s_playing = false;
+        s_playing_file[0] = '\0';
         audio_unlock();
         esp_audio_simple_player_stop(old);
         esp_audio_simple_player_destroy(old);
@@ -1442,6 +1460,7 @@ static esp_err_t _api_play(httpd_req_t *req) {
         if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Recording in progress\"}"); return ESP_OK; }
     }
     s_playing = false;
+    s_playing_file[0] = '\0';
     esp_asp_cfg_t c = {.out = {.cb = _asp_out}, .task_prio = 3, .task_stack = 8192, .task_core = 1, .task_stack_in_ext = true};
     if (esp_audio_simple_player_new(&c, &s_asp) != ESP_GMF_ERR_OK || !s_asp) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
     esp_audio_simple_player_set_event(s_asp, _asp_evt, NULL);
@@ -1451,7 +1470,12 @@ static esp_err_t _api_play(httpd_req_t *req) {
         esp_audio_simple_player_destroy(s_asp); s_asp = NULL;
         audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
     }
-    s_playing = true; audio_unlock();
+    s_playing = true;
+    /* Store filename (basename only) for play_status */
+    const char *base = strrchr(safe, '/');
+    base = base ? base + 1 : safe;
+    strlcpy(s_playing_file, base, sizeof(s_playing_file));
+    audio_unlock();
     ESP_LOGI(TAG, "Play: %s", uri);
     httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
 }
@@ -1465,6 +1489,7 @@ static esp_err_t _api_stop(httpd_req_t *req) {
         esp_audio_simple_player_destroy(s_asp);
         s_asp = NULL;
         s_playing = false;
+        s_playing_file[0] = '\0';
     }
     audio_unlock();
     httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK;
@@ -1473,9 +1498,12 @@ static esp_err_t _api_stop(httpd_req_t *req) {
 /* GET /api/audio/play_status */
 static esp_err_t _api_play_status(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
+    audio_lock();
     bool playing = s_playing.load(std::memory_order_acquire);
-    char r[64];
-    snprintf(r, sizeof(r), "{\"playing\":%s}", playing ? "true" : "false");
+    char file_snap[128]; strlcpy(file_snap, s_playing_file, sizeof(file_snap));
+    audio_unlock();
+    char r[256];
+    snprintf(r, sizeof(r), "{\"playing\":%s,\"file\":\"%s\"}", playing ? "true" : "false", file_snap);
     httpd_resp_send(req, r, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
