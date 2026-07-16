@@ -1358,20 +1358,17 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
     s_rec_start_ms.store((uint32_t)(esp_timer_get_time() / 1000), std::memory_order_relaxed);
     s_is_recording = true;
 
-    /* Stop any active playback — recording and playback share I2S */
+    /* Stop any active playback — recording and playback share I2S.
+     * Capture the old handle and clear globals under the lock, then
+     * stop/destroy outside the lock (may block). No re-check needed:
+     * any new playback started while unlocked uses a different handle. */
     if (s_asp && s_playing) {
         esp_asp_handle_t old = s_asp; s_asp = NULL; s_playing = false;
+        s_playing_file[0] = '\0';
         audio_unlock();
         esp_audio_simple_player_stop(old);
         esp_audio_simple_player_destroy(old);
         audio_lock();
-        if (s_asp && s_playing) {  /* Re-check */
-            esp_asp_handle_t old2 = s_asp; s_asp = NULL; s_playing = false;
-            audio_unlock();
-            esp_audio_simple_player_stop(old2);
-            esp_audio_simple_player_destroy(old2);
-            audio_lock();
-        }
     }
     audio_unlock();
     ESP_LOGI(TAG, "Recording: %s", s_rec_path);
@@ -1503,8 +1500,6 @@ static esp_err_t _api_play(httpd_req_t *req) {
         audio_lock();
         if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Recording in progress\"}"); return ESP_OK; }
     }
-    s_playing = false;
-    s_playing_file[0] = '\0';
     esp_asp_cfg_t c = {.out = {.cb = _asp_out}, .task_prio = 3, .task_stack = 8192, .task_core = 1, .task_stack_in_ext = true};
     if (esp_audio_simple_player_new(&c, &s_asp) != ESP_GMF_ERR_OK || !s_asp) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
     esp_audio_simple_player_set_event(s_asp, _asp_evt, NULL);
