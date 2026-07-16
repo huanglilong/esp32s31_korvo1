@@ -36,6 +36,7 @@
 #define CAMERA_APP_TASK_STACK_SIZE (6 * 1024)
 #define CAMERA_APP_TASK_PRIORITY   5
 #define CAMERA_APP_TASK_CORE       0     /* Run on HP core (Core 0) */
+#define CAMERA_APP_TARGET_FPS      5     /* Target frame rate: reduce CPU load (was ~11fps natural) */
 
 /* ── CameraApp class ────────────────────────────────────────────── */
 
@@ -141,6 +142,7 @@ private:
     std::atomic<float>    _fps;
     uint32_t              _fps_last_count;    /* Protected by _mutex */
     int64_t               _fps_last_time;     /* Protected by _mutex */
+    int64_t               _last_frame_us{0};  /* Frame throttle timestamp */
 
     /* uORB */
     orb_advert_t          _pub_state;

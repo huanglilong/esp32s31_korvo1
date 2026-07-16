@@ -439,6 +439,19 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t camera_buf_index,
         self._frame_height = camera_buf_ves;
     }
 
+    /* FPS throttle: skip frames to reduce CPU load (Core 0).
+     * At natural ~11fps, each frame costs PPA SRM + LVGL canvas refresh
+     * (~15-20ms CPU). Limiting to CAMERA_APP_TARGET_FPS reduces PPA/LVGL
+     * overhead proportionally without affecting preview quality. */
+    {
+        int64_t now_us = esp_timer_get_time();
+        int64_t frame_interval_us = 1000000LL / CAMERA_APP_TARGET_FPS;  /* 5fps → 200ms */
+        if ((now_us - self._last_frame_us) < frame_interval_us) {
+            return;  /* Skip this frame */
+        }
+        self._last_frame_us = now_us;
+    }
+
     uint32_t canvas_w = BSP_LCD_H_RES;
     uint32_t canvas_h = BSP_LCD_V_RES;
 
@@ -516,6 +529,7 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t camera_buf_index,
         uint32_t copy_h = camera_buf_ves;
         if (offset_x < 0) { copy_w = canvas_w; offset_x = 0; }
         if (offset_y < 0) { copy_h = canvas_h; offset_y = 0; }
+        (void)copy_w;  /* Used for bounds checking above */
 
         uint16_t *dst = (uint16_t *)canvas_buf;
         size_t total_pixels = canvas_w * canvas_h;

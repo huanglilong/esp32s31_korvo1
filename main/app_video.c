@@ -25,7 +25,7 @@ static const char *TAG = "app_video";
 #define MAX_BUFFER_COUNT                (6)
 #define MIN_BUFFER_COUNT                (2)
 #define VIDEO_TASK_STACK_SIZE           (4 * 1024)
-#define VIDEO_TASK_PRIORITY             (6)
+#define VIDEO_TASK_PRIORITY             (4)
 
 typedef struct {
     uint8_t *camera_buffer[MAX_BUFFER_COUNT];
@@ -344,6 +344,11 @@ static void video_stream_task(void *arg)
             xSemaphoreGive(app_camera_video.video_stop_sem);
             vTaskDelete(NULL);
         }
+
+        /* Yield to other tasks on same core (e.g. WiFi, IP stack).
+         * VIDIOC_DQBUF blocks waiting for next frame (~11fps = 91ms gap),
+         * so the loop body doesn't need to busy-poll between frames. */
+        vTaskDelay(1);
     }
     vTaskDelete(NULL);
 }

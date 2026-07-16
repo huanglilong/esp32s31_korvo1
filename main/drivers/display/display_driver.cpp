@@ -1,7 +1,9 @@
 /*
  * DisplayDriver — LCD + LVGL display management via BSP (espressif/esp32_s31_korvo_1).
  *
- * Uses BSP's bsp_display_start() for all-in-one LCD + LVGL + Touch init.
+ * Uses BSP's bsp_display_start_with_config() for all-in-one LCD + LVGL + Touch init.
+ * Overrides BSP default LVGL port config: pins LVGL task to Core 1 to balance load
+ * (Core 0: camera/video/wifi, Core 1: LVGL/HTTP/audio/system monitor).
  * Hardware: ESP32-S3-LCD-EV-Board-SUB3 (4.3" RGB LCD, 800x480).
  * Singleton, thread-safe.
  * Display is optional — gracefully skips if LCD subboard not connected.
@@ -61,8 +63,34 @@ int DisplayDriver::init() {
     ESP_LOGI(TAG, "Initializing display via BSP (RGB LCD 800x480 + GT1151 touch)...");
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
-    /* All-in-one: LCD + LVGL + Touch via BSP */
-    _disp = bsp_display_start();
+    /* All-in-one: LCD + LVGL + Touch via BSP.
+     * Override default LVGL port config to pin LVGL task to Core 1:
+     *   - Core 0: camera/video (V4L2 stream task), WiFi, DVP DMA interrupts
+     *   - Core 1: LVGL rendering, HTTP server, system monitor, audio pipeline
+     * task_max_sleep_ms=500 reduces CPU polling when LVGL is idle
+     * (no display updates between camera frames). */
+    bsp_display_cfg_t cfg = {
+        .lvgl_port_cfg = {
+            .task_priority = 4,
+            .task_stack = 7168,
+            .task_affinity = 1,        /* Pin to Core 1: balance load (Core 0 has camera/video/wifi) */
+            .task_max_sleep_ms = 500,  /* Sleep up to 500ms when idle (event-woken for touch/button) */
+            .task_stack_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT,
+            .timer_period_ms = 5,
+        },
+        .buffer_size = BSP_LCD_H_RES * CONFIG_BSP_LCD_DRAW_BUF_HEIGHT,
+#if CONFIG_BSP_LCD_DRAW_BUF_DOUBLE
+        .double_buffer = 1,
+#else
+        .double_buffer = 0,
+#endif
+        .flags = {
+            .buff_dma = true,
+            .buff_spiram = false,
+            .sw_rotate = false,
+        }
+    };
+    _disp = bsp_display_start_with_config(&cfg);
     if (!_disp) {
         ESP_LOGW(TAG, "Display init failed — LCD subboard may not be connected");
         xSemaphoreGive(_mutex);
