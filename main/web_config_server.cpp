@@ -1991,8 +1991,15 @@ static void _web_config_task(void *arg)
         if (st.sta_connected && !s_sntp_synced.load(std::memory_order_acquire)) {
             if (++sntp_log_counter >= 10) {  /* Every 10s */
                 sntp_log_counter = 0;
+                char tz_snap[32] = {};
+                if (s_timezone_mutex && xSemaphoreTake(s_timezone_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                    strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+                    xSemaphoreGive(s_timezone_mutex);
+                } else {
+                    strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
+                }
                 ESP_LOGI(TAG, "SNTP: waiting for time sync (server=%s, TZ=%s)...",
-                         CONFIG_SNTP_SERVER_0, s_timezone);
+                         CONFIG_SNTP_SERVER_0, tz_snap);
             }
         } else {
             sntp_log_counter = 0;
