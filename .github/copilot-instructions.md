@@ -99,7 +99,7 @@ pytest tests --base-url=http://esp-web.local:8080 -v  # Run tests (requires devi
 **Linux**: `idf.py flash -b 1500000 -p $(bash -c "ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1") monitor`
 **macOS**: `idf.py flash -b 1500000 -p $(bash -c "ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null | head -1") monitor`
 
-After code changes, rebuild. **⚠️ If `sdkconfig.defaults` changed, MUST `idf.py fullclean && idf.py build` — sdkconfig is NOT auto-regenerated from defaults on incremental build!**
+After code changes, rebuild. **⚠️ If `sdkconfig.defaults` changed, MUST delete `sdkconfig`, then `idf.py build` — sdkconfig is NOT auto-regenerated from defaults on incremental build!**
 
 ### 4.2 Debug Workflow (no TTY)
 
@@ -176,8 +176,8 @@ When modifying `components/` code, follow its existing coding style and architec
 | `gettimeofday()` for durations | `esp_timer_get_time()` (monotonic) |
 | Releasing mutex mid-operation (TOCTOU) | Double-check shared state after re-acquisition |
 | Calling blocking ops while holding mutex | Release mutex before blocking call |
-| Editing `sdkconfig` | Edit `sdkconfig.defaults` + **`fullclean`** |
-| Changing `sdkconfig.defaults` without `fullclean` | `idf.py fullclean && idf.py build` (sdkconfig NOT auto-regenerated on incremental build) |
+| Editing `sdkconfig` | Edit `sdkconfig.defaults` + **delete `sdkconfig` then rebuild** |
+| Changing `sdkconfig.defaults` without deleting `sdkconfig` | Delete `sdkconfig`, then `idf.py fullclean && idf.py build` (sdkconfig NOT auto-regenerated from defaults on incremental build) |
 | Editing `main/generated/` | Edit source files + regenerate |
 
 ## 10. Board-Specific Notes (ESP32-S31-Korvo-1 V1.1)
