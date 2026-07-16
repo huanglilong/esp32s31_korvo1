@@ -2130,5 +2130,11 @@ void web_config_server_stop(void) {
         s_httpd = nullptr;
     }
 
+    /* Free pre-allocated audio task TCB (no longer needed after server stop) */
+    if (s_audio_tcb) {
+        heap_caps_free(s_audio_tcb);
+        s_audio_tcb = NULL;
+    }
+
     ESP_LOGI(TAG, "Web config server stopped");
 }
