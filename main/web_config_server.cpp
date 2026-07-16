@@ -1148,8 +1148,10 @@ static esp_err_t _api_timezone_set(httpd_req_t *req) {
     }
 
     /* Apply timezone (protected by mutex against concurrent reads) */
+    char tz_snap[32] = {};
     if (s_timezone_mutex) xSemaphoreTake(s_timezone_mutex, portMAX_DELAY);
     strlcpy(s_timezone, new_tz, sizeof(s_timezone));
+    strlcpy(tz_snap, s_timezone, sizeof(tz_snap));
     setenv("TZ", s_timezone, 1);
     tzset();
     if (s_timezone_mutex) xSemaphoreGive(s_timezone_mutex);
@@ -1157,16 +1159,16 @@ static esp_err_t _api_timezone_set(httpd_req_t *req) {
     /* Persist to NVS */
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE_SETTINGS, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_str(h, NVS_KEY_TIMEZONE, s_timezone);
+        nvs_set_str(h, NVS_KEY_TIMEZONE, tz_snap);
         nvs_commit(h);
         nvs_close(h);
     }
 
     cJSON_Delete(json);
-    ESP_LOGI(TAG, "Timezone set to: %s", s_timezone);
+    ESP_LOGI(TAG, "Timezone set to: %s", tz_snap);
 
     cJSON *resp = cJSON_CreateObject();
-    cJSON_AddStringToObject(resp, "timezone", s_timezone);
+    cJSON_AddStringToObject(resp, "timezone", tz_snap);
     char *json_str = cJSON_PrintUnformatted(resp);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
