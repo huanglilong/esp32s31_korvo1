@@ -79,6 +79,11 @@ esp32s31_korvo1/
 │       ├── CMakeLists.txt, idf_component.yml, Kconfig.projbuild
 │       ├── include/ulog_writer.h, ulog_messages.h
 │       └── ulog_writer.cpp
+│   └── gen_bmgr_codes/       # Auto-generated board manager codes (esp_board_manager board definitions)
+│       ├── CMakeLists.txt, idf_component.yml, Kconfig.projbuild
+│       ├── gen_board_info.c, gen_board_periph_config.c, gen_board_periph_handles.c
+│       ├── gen_board_device_config.c, gen_board_device_handles.c
+│       └── gen_board_metadata.yaml
 ├── proto/                    # uORB topic 定义 (.msg, PX4 兼容)
 │   ├── wifi_state.msg, volume_state.msg, ...
 │   └── system_stats.msg, system_alert.msg
@@ -164,3 +169,4 @@ esp32s31_korvo1/
 | **ESP-GMF** | 通用多媒体框架 (音视频管道) |
 | **ESP-Matter** | Matter + Thread 智能家居协议 |
 | **esp_board_manager** | 板载外设管理组件 |
+| **gen_bmgr_codes** | esp_board_manager 自动生成的板级定义代码 (外设/设备配置+句柄) |

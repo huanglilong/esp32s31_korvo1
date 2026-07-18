@@ -330,17 +330,39 @@ errout:
 static void video_stream_task(void *arg)
 {
     int video_fd = *((int *)arg);
+    int consecutive_failures = 0;
+    const int max_consecutive_failures = 10;
 
     while (1) {
-        ESP_ERROR_CHECK(video_receive_video_frame(video_fd));
+        esp_err_t ret = video_receive_video_frame(video_fd);
+        if (ret != ESP_OK) {
+            consecutive_failures++;
+            if (consecutive_failures >= max_consecutive_failures) {
+                ESP_LOGE(TAG, "Too many consecutive frame receive failures (%d), stopping stream",
+                         consecutive_failures);
+                video_stream_stop(video_fd);
+                xSemaphoreGive(app_camera_video.video_stop_sem);
+                vTaskDelete(NULL);
+            }
+            // Back off before retrying to avoid busy-looping
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        consecutive_failures = 0;
 
         video_operation_video_frame(video_fd);
 
-        ESP_ERROR_CHECK(video_free_video_frame(video_fd));
+        ret = video_free_video_frame(video_fd);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to free video frame, continuing");
+        }
 
         if (app_camera_video.video_task_delete) {
             app_camera_video.video_task_delete = false;
-            ESP_ERROR_CHECK(video_stream_stop(video_fd));
+            esp_err_t stop_ret = video_stream_stop(video_fd);
+            if (stop_ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to stop video stream on task exit");
+            }
             xSemaphoreGive(app_camera_video.video_stop_sem);
             vTaskDelete(NULL);
         }
