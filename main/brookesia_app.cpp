@@ -2,7 +2,7 @@
  * ESP-Brookesia application runtime.
  *
  * Initializes the Brookesia HAL, ServiceManager, Display service,
- * Audio service, and LVGL GUI when APP_BROOKESIA_ENABLE is enabled.
+ * and LVGL GUI when APP_BROOKESIA_ENABLE is enabled.
  *
  * When disabled, all functions are no-ops — the legacy BSP-based
  * drivers remain the sole hardware owners.
@@ -10,6 +10,8 @@
 
 #include "sdkconfig.h"
 #include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_event.h"
 
 #if CONFIG_APP_BROOKESIA_ENABLE
 #include <memory>
@@ -110,6 +112,14 @@ bool brookesia_app_start()
 {
 #if CONFIG_APP_BROOKESIA_ENABLE
     ESP_LOGI(TAG, "=== Brookesia App Runtime ===");
+
+    /* Initialize TCP/IP network stack before any HAL device (WiFi) uses it */
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    /* Create default event loop (required by mdns, wifi_manager, etc.) */
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_LOGI(TAG, "Default event loop created");
+    ESP_LOGI(TAG, "esp_netif initialized");
 
     s_backend_scheduler = std::make_shared<lib_utils::TaskScheduler>();
     if (!s_backend_scheduler) {
