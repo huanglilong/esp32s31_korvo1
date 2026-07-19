@@ -2,7 +2,7 @@
  * ESP-Brookesia application runtime.
  *
  * Initializes the Brookesia HAL, ServiceManager, Display service,
- * and LVGL GUI when APP_BROOKESIA_ENABLE is enabled.
+ * Audio service, and LVGL GUI when APP_BROOKESIA_ENABLE is enabled.
  *
  * When disabled, all functions are no-ops — the legacy BSP-based
  * drivers remain the sole hardware owners.
@@ -29,29 +29,26 @@ using LvglDisplaySource = gui::lvgl::DisplaySource;
 static const char *TAG = "BrookesiaApp";
 static std::shared_ptr<lib_utils::TaskScheduler> s_backend_scheduler;
 
-static constexpr uint32_t DISPLAY_SERVICE_TIMEOUT_MS = 1000;
+static constexpr uint32_t SERVICE_TIMEOUT_MS = 1000;
 
 static bool start_display_service()
 {
     ESP_LOGI(TAG, "Starting Brookesia Display service...");
 
-    // Check if Display service is available
     if (!DisplayHelper::is_available()) {
         ESP_LOGE(TAG, "Display service is not available");
         return false;
     }
 
-    // Bind to the Display service
     auto binding = service::ServiceManager::get_instance().bind(DisplayHelper::get_name().data());
     if (!binding.is_valid()) {
         ESP_LOGE(TAG, "Failed to bind Display service");
         return false;
     }
 
-    // Get display outputs
     auto outputs_json = DisplayHelper::call_function_sync<boost::json::array>(
         DisplayHelper::FunctionId::GetOutputs,
-        service::helper::Timeout(DISPLAY_SERVICE_TIMEOUT_MS)
+        service::helper::Timeout(SERVICE_TIMEOUT_MS)
     );
     if (!outputs_json.has_value()) {
         ESP_LOGE(TAG, "Failed to get Display outputs");
@@ -72,10 +69,9 @@ static bool start_display_service()
     ESP_LOGI(TAG, "Display output: %s (%ux%u)", main_output.name.c_str(),
              main_output.width, main_output.height);
 
-    // Start LVGL display source
     gui::lvgl::DisplaySourceConfig lvgl_config{};
     lvgl_config.output_name = "";
-    lvgl_config.task_core_id = 1;  // Core 1 for LVGL (Core 0 for WiFi/Camera)
+    lvgl_config.task_core_id = 1;
     lvgl_config.task_stack_size = 40 * 1024;
 
     auto &lvgl_source = LvglDisplaySource::get_instance();
@@ -84,19 +80,17 @@ static bool start_display_service()
         return false;
     }
 
-    // Activate LVGL as the active source
     auto result = DisplayHelper::call_function_sync(
         DisplayHelper::FunctionId::SetActiveSourceRole,
         std::string(),
         std::string(gui::lvgl::DISPLAY_SOURCE_ROLE),
-        service::helper::Timeout(DISPLAY_SERVICE_TIMEOUT_MS)
+        service::helper::Timeout(SERVICE_TIMEOUT_MS)
     );
     if (!result.has_value()) {
         ESP_LOGE(TAG, "Failed to activate LVGL source");
         return false;
     }
 
-    // Turn on backlight if supported
     if (main_output.backlight.has_value() && main_output.backlight->on_off_supported) {
         auto bl_result = DisplayHelper::call_function_async(
             DisplayHelper::FunctionId::SetBacklightOnOff,
@@ -104,14 +98,10 @@ static bool start_display_service()
         );
         if (!bl_result) {
             ESP_LOGW(TAG, "Failed to turn on backlight");
-        } else {
-            ESP_LOGI(TAG, "Backlight turned on");
         }
-    } else {
-        ESP_LOGI(TAG, "Backlight on/off not supported by this output");
     }
 
-    ESP_LOGI(TAG, "Brookesia Display service started successfully");
+    ESP_LOGI(TAG, "Brookesia Display service started");
     return true;
 }
 #endif // CONFIG_APP_BROOKESIA_ENABLE
@@ -121,7 +111,6 @@ bool brookesia_app_start()
 #if CONFIG_APP_BROOKESIA_ENABLE
     ESP_LOGI(TAG, "=== Brookesia App Runtime ===");
 
-    // Create a task scheduler for backend operations
     s_backend_scheduler = std::make_shared<lib_utils::TaskScheduler>();
     if (!s_backend_scheduler) {
         ESP_LOGE(TAG, "Failed to create task scheduler");
@@ -130,18 +119,8 @@ bool brookesia_app_start()
 
     auto start_result = s_backend_scheduler->start({
         .worker_configs = {
-            {
-                .name = "BrookesiaWorker1",
-                .core_id = 0,
-                .priority = 1,
-                .stack_size = 10 * 1024,
-            },
-            {
-                .name = "BrookesiaWorker2",
-                .core_id = 1,
-                .priority = 1,
-                .stack_size = 10 * 1024,
-            },
+            { .name = "BrookesiaWorker1", .core_id = 0, .priority = 1, .stack_size = 10 * 1024 },
+            { .name = "BrookesiaWorker2", .core_id = 1, .priority = 1, .stack_size = 10 * 1024 },
         }
     });
     if (!start_result) {
@@ -149,18 +128,15 @@ bool brookesia_app_start()
         return false;
     }
 
-    // Start the ServiceManager — this probes/init/starts HAL devices and services
     auto &service_manager = service::ServiceManager::get_instance();
     if (!service_manager.start()) {
         ESP_LOGE(TAG, "Failed to start ServiceManager");
         return false;
     }
-    ESP_LOGI(TAG, "ServiceManager started");
+    ESP_LOGI(TAG, "ServiceManager started — Brookesia owns all HAL devices");
 
-    // Start the Display service
     if (!start_display_service()) {
-        ESP_LOGE(TAG, "Failed to start Display service — continuing without display");
-        // Non-fatal — other services may still work
+        ESP_LOGW(TAG, "Display service unavailable — continuing without display");
     }
 
     ESP_LOGI(TAG, "=== Brookesia App Runtime started ===");

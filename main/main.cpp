@@ -141,6 +141,7 @@ static void _build_camera_config() {
 static std::atomic<SemaphoreHandle_t> s_mdns_mutex_atomic{nullptr};
 static int  s_mdns_refcount = 0;
 static bool s_mdns_initialized = false;
+static bool s_brookesia_owns_hardware = false;
 
 /* ── mDNS hostname ──────────────────────────────────────────────── */
 static char s_mdns_unique_hostname[24] = {0};
@@ -348,10 +349,23 @@ extern "C" void app_main(void) {
     _build_sdcard_config();
     _build_camera_config();
 
-    /* 4. Mount SD card (config-driven) */
+    /* 3b. Start Brookesia runtime (if APP_BROOKESIA_ENABLE=y) */
+    s_brookesia_owns_hardware = brookesia_app_start();
+
+    /* Declare variables used later, regardless of Brookesia ownership */
     void *sdcard_handle = nullptr;
+    bool sd_ok = false;
+    int audio_ret = -1;
+    int cam_ret = -1;
+    void *camera_handle = nullptr;
+    void *audio_handle = nullptr;
+    int btn_ret = -1;
+    int led_ret = -1;
+
+    if (!s_brookesia_owns_hardware) {
+    /* 4. Mount SD card (config-driven) */
     int sd_ret = SDCardDriver::instance().init(&s_sdcard_cfg, sizeof(s_sdcard_cfg), &sdcard_handle);
-    bool sd_ok = (sd_ret == 0);
+    sd_ok = (sd_ret == 0);
     if (sd_ok) {
         ESP_LOGI(TAG, "SD card mounted");
     } else {
@@ -359,8 +373,7 @@ extern "C" void app_main(void) {
     }
 
     /* 5. Initialize audio driver (config-driven) */
-    void *audio_handle = nullptr;
-    int audio_ret = AudioDriver::instance().init(&s_audio_cfg, sizeof(s_audio_cfg), &audio_handle);
+    audio_ret = AudioDriver::instance().init(&s_audio_cfg, sizeof(s_audio_cfg), &audio_handle);
     if (audio_ret == 0) {
         ESP_LOGI(TAG, "Audio driver initialized");
     } else {
@@ -368,8 +381,7 @@ extern "C" void app_main(void) {
     }
 
     /* 5a. Initialize camera driver (config-driven) */
-    void *camera_handle = nullptr;
-    int cam_ret = CameraDriver::instance().init(&s_camera_cfg, sizeof(s_camera_cfg), &camera_handle);
+    cam_ret = CameraDriver::instance().init(&s_camera_cfg, sizeof(s_camera_cfg), &camera_handle);
     if (cam_ret == 0) {
         ESP_LOGI(TAG, "Camera driver initialized");
     } else {
@@ -377,7 +389,7 @@ extern "C" void app_main(void) {
     }
 
     /* 5b. Initialize button driver (via BSP) */
-    int btn_ret = ButtonDriver::instance().init();
+    btn_ret = ButtonDriver::instance().init();
     if (btn_ret == 0) {
         ESP_LOGI(TAG, "Button driver initialized (SET/MODE/VOLP/VOLM)");
     } else {
@@ -385,7 +397,7 @@ extern "C" void app_main(void) {
     }
 
     /* 5c. Initialize LED driver (via BSP) */
-    int led_ret = LedDriver::instance().init();
+    led_ret = LedDriver::instance().init();
     if (led_ret == 0) {
         ESP_LOGI(TAG, "LED driver initialized (WS2812, GPIO37)");
     } else {
@@ -403,6 +415,9 @@ extern "C" void app_main(void) {
         } else {
             ESP_LOGI(TAG, "WiFi service started");
         }
+    }
+    } else {
+        ESP_LOGI(TAG, "Brookesia owns all hardware — skipping legacy driver init");
     }
 
     /* 7. Start web config server */
@@ -440,9 +455,11 @@ extern "C" void app_main(void) {
     }
 
     /* 11. Initialize display driver (via BSP, optional, AFTER system is live) */
+    int display_ret = -1;
+    if (!s_brookesia_owns_hardware) {
     ESP_LOGI(TAG, "Initializing display...");
     fflush(stdout);
-    int display_ret = DisplayDriver::instance().init();
+    display_ret = DisplayDriver::instance().init();
     if (display_ret == 0) {
         ESP_LOGI(TAG, "Display driver initialized (%dx%d)",
                  DisplayDriver::instance().width(),
@@ -450,13 +467,9 @@ extern "C" void app_main(void) {
     } else {
         ESP_LOGW(TAG, "Display driver not available (LCD subboard not connected?)");
     }
-
-    /* 11b. Start Brookesia runtime (if APP_BROOKESIA_ENABLE=y) */
-    if (brookesia_app_start()) {
-        ESP_LOGI(TAG, "Brookesia runtime started -- Brookesia now owns display");
-        /* When Brookesia takes over, skip the legacy Camera App preview */
-        display_ret = -1;  /* Signal Camera App to skip */
     }
+
+
     /* 12. Initialize Camera App (camera streaming to LCD, optional) */
     if (display_ret == 0 && cam_ret == 0) {
         ESP_LOGI(TAG, "Initializing Camera App...");
