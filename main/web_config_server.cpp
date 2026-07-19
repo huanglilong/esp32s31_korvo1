@@ -1496,7 +1496,15 @@ static esp_err_t _api_rec_status(httpd_req_t *req) {
         if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
         else httpd_resp_sendstr(req, "{}");
         cJSON_Delete(root);
-    } else httpd_resp_sendstr(req, "{\"recording\":0}");
+    } else {
+        cJSON *root = cJSON_CreateObject();
+        if (!root) { httpd_resp_sendstr(req, "{}"); return ESP_OK; }
+        cJSON_AddBoolToObject(root, "recording", false);
+        char *j = cJSON_PrintUnformatted(root);
+        if (j) { httpd_resp_sendstr(req, j); cJSON_free(j); }
+        else httpd_resp_sendstr(req, "{}");
+        cJSON_Delete(root);
+    }
     return ESP_OK;
 }
 
