@@ -1,6 +1,4 @@
 dependencies:
-  # Brookesia master/v0.8 from local checkout (GitHub unreachable in this network).
-  # HAL version requirement fixed in local clone: 0.5.* → >=0.6.0
   espressif/brookesia_service_display:
     path: /home/llhuang/works/opensource/esp-brookesia/service/media/brookesia_service_display
   espressif/brookesia_service_audio:
@@ -17,6 +15,8 @@ dependencies:
     path: /home/llhuang/works/opensource/esp-brookesia/service/framework/brookesia_service_manager
   espressif/brookesia_service_helper:
     path: /home/llhuang/works/opensource/esp-brookesia/service/framework/brookesia_service_helper
+  espressif/brookesia_runtime_manager:
+    path: /home/llhuang/works/opensource/esp-brookesia/runtime/brookesia_runtime_manager
 
   espressif/mdns:
     version: ^1.0
@@ -28,16 +28,12 @@ dependencies:
     version: ^1.7
   espressif/esp_codec_dev:
     version: ^1.5
-  # Official BSP for ESP32-S31-Korvo-1: provides Display/LVGL/Touch/Buttons/Audio/SDCARD/LED/Camera drivers
   espressif/esp32_s31_korvo_1:
     version: ^1.0.0~1
-  # V4L2 video device support (camera DVP → /dev/video0)
   espressif/esp_video:
     version: ^2.2
   protocol_examples_common:
     path: ${IDF_PATH}/examples/common_components/protocol_examples_common
   idf:
     version: '>=5.3'
-  espressif/brookesia_runtime_manager:
-    path: /home/llhuang/works/opensource/esp-brookesia/runtime/brookesia_runtime_manager
   espressif/esp_board_manager: '>=0.6.0'
