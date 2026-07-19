@@ -1359,6 +1359,8 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
     s_enc_out_buf = (uint8_t*)heap_caps_calloc(1, s_enc_out_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_enc_in_buf || !s_enc_out_buf) {
         ESP_LOGE(TAG, "Encoder buffer alloc failed");
+        if (s_enc_in_buf) { heap_caps_free(s_enc_in_buf); s_enc_in_buf = NULL; }
+        if (s_enc_out_buf) { heap_caps_free(s_enc_out_buf); s_enc_out_buf = NULL; }
         esp_audio_enc_close(s_encoder); s_encoder = nullptr;
         audio_unlock(); _stop_audio_task_if_running(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK;
     }
