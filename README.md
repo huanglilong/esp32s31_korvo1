@@ -116,7 +116,21 @@
     $ idf.py build && idf.py flash -b 1500000 -p $(bash -c "ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null | head -1") monitor
     ```
 
-### Software Features
+### Clean Build
+
+首次构建或需要完全重新生成依赖、配置和板级代码时：
+
+```bash
+$ pip3 install esp-bmgr-assist
+$ rm -rf build managed_components sdkconfig
+$ idf.py bmgr -b esp32_s31_korvo_1
+$ idf.py build
+```
+
+`idf.py bmgr` 依赖 Python 包 `esp-bmgr-assist`；首次使用或环境重建后先执行 `pip3 install esp-bmgr-assist`。
+
+`components/gen_bmgr_codes/` 由 `idf.py bmgr -b esp32_s31_korvo_1` 自动生成，已加入 `.gitignore`，禁止手工编辑。修改 `sdkconfig.defaults` 后必须删除 `sdkconfig` 再构建。
+
 
 - **Audio Pipeline**: 双模拟麦克风 → ES8389 ADC → I2S → ESP32-S31 处理 → I2S → ES8389 DAC → NS4150B PA → 扬声器
   - > ⚠️ MCLK 不可用，采样率 **16kHz** (BSP 官方推荐)。**改了 `sdkconfig.defaults` 必须删除 `sdkconfig` 再 `idf.py build`，否则 sdkconfig 不会更新！**

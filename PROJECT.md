@@ -79,11 +79,7 @@ esp32s31_korvo1/
 │       ├── CMakeLists.txt, idf_component.yml, Kconfig.projbuild
 │       ├── include/ulog_writer.h, ulog_messages.h
 │       └── ulog_writer.cpp
-│   └── gen_bmgr_codes/       # Auto-generated board manager codes (esp_board_manager board definitions)
-│       ├── CMakeLists.txt, idf_component.yml, Kconfig.projbuild
-│       ├── gen_board_info.c, gen_board_periph_config.c, gen_board_periph_handles.c
-│       ├── gen_board_device_config.c, gen_board_device_handles.c
-│       └── gen_board_metadata.yaml
+│   └── gen_bmgr_codes/       # ⚠️ 自动生成 — 先 `pip3 install esp-bmgr-assist`，再运行 `idf.py bmgr -b esp32_s31_korvo_1`，不纳入 Git
 ├── proto/                    # uORB topic 定义 (.msg, PX4 兼容)
 │   ├── wifi_state.msg, volume_state.msg, ...
 │   └── system_stats.msg, system_alert.msg
@@ -169,4 +165,4 @@ esp32s31_korvo1/
 | **ESP-GMF** | 通用多媒体框架 (音视频管道) |
 | **ESP-Matter** | Matter + Thread 智能家居协议 |
 | **esp_board_manager** | 板载外设管理组件 |
-| **gen_bmgr_codes** | esp_board_manager 自动生成的板级定义代码 (外设/设备配置+句柄) |
+| **gen_bmgr_codes** | 由 `idf.py bmgr -b esp32_s31_korvo_1` 自动生成的板级定义代码；运行前需安装 `esp-bmgr-assist`，目录已忽略，不应手工编辑 |
