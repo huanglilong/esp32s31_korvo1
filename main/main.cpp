@@ -403,8 +403,14 @@ extern "C" void app_main(void) {
     } else {
         ESP_LOGW(TAG, "LED driver not available");
     }
+    } else {
+        ESP_LOGI(TAG, "Brookesia owns audio/display/input hardware — skipping legacy peripheral drivers");
+    }
 
-    /* 6. Initialize WiFi service (which also initializes esp_netif) */
+    /* 6. Initialize WiFi service (always runs — critical for web provisioning and testing).
+     * Runs regardless of Brookesia ownership: WiFi is a network service, not a peripheral driver.
+     * Brookesia's WiFi HAL adaptor is available but our legacy WiFi service with captive portal
+     * provides the web config UI that powers the test suite. */
     ret = WifiService::instance().init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "WiFi service init failed: %s", esp_err_to_name(ret));
@@ -415,9 +421,6 @@ extern "C" void app_main(void) {
         } else {
             ESP_LOGI(TAG, "WiFi service started");
         }
-    }
-    } else {
-        ESP_LOGI(TAG, "Brookesia owns all hardware — skipping legacy driver init");
     }
 
     /* 7. Start web config server */

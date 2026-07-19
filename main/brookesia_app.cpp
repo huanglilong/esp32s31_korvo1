@@ -146,11 +146,24 @@ bool brookesia_app_start()
 #if CONFIG_APP_BROOKESIA_ENABLE
     ESP_LOGI(TAG, "=== Brookesia App Runtime ===");
 
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_LOGI(TAG, "esp_netif initialized");
+    /* esp_netif_init() and esp_event_loop_create_default() may already be
+     * initialized by WifiService (legacy WiFi). ESP_ERROR_CHECK would abort
+     * on ESP_ERR_INVALID_STATE — handle gracefully instead. */
+    esp_err_t _netif_err = esp_netif_init();
+    if (_netif_err == ESP_OK) {
+        ESP_LOGI(TAG, "esp_netif initialized");
+    } else if (_netif_err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(_netif_err));
+        return false;
+    }
 
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    ESP_LOGI(TAG, "Default event loop created");
+    esp_err_t _evt_err = esp_event_loop_create_default();
+    if (_evt_err == ESP_OK) {
+        ESP_LOGI(TAG, "Default event loop created");
+    } else if (_evt_err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "esp_event_loop_create_default failed: %s", esp_err_to_name(_evt_err));
+        return false;
+    }
 
     s_backend_scheduler = std::make_shared<lib_utils::TaskScheduler>();
     if (!s_backend_scheduler) {

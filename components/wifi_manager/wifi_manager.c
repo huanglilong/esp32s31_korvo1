@@ -474,8 +474,21 @@ esp_err_t wifi_manager_init(void)
     s_wifi_event_group = xEventGroupCreate();
     if (!s_wifi_event_group) return ESP_ERR_NO_MEM;
 
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    /* esp_netif_init() and esp_event_loop_create_default() may already be
+     * initialized by Brookesia or other components. ESP_ERROR_CHECK would
+     * abort on ESP_ERR_INVALID_STATE — handle gracefully instead. */
+    {
+        esp_err_t _err = esp_netif_init();
+        if (_err != ESP_OK && _err != ESP_ERR_INVALID_STATE) {
+            ESP_ERROR_CHECK(_err);
+        }
+    }
+    {
+        esp_err_t _err = esp_event_loop_create_default();
+        if (_err != ESP_OK && _err != ESP_ERR_INVALID_STATE) {
+            ESP_ERROR_CHECK(_err);
+        }
+    }
     s_sta_netif = esp_netif_create_default_wifi_sta();
     s_ap_netif = esp_netif_create_default_wifi_ap();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
