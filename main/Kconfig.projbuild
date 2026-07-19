@@ -1,6 +1,21 @@
 menu "ESP32-S31 Korvo-1 Configuration"
 
-    # SD Card
+    config APP_BROOKESIA_BUILD
+        bool "Compile ESP-Brookesia integration"
+        default y
+        help
+            Compile the ESP-Brookesia master/v0.8 integration layer.
+            Hardware ownership remains with the legacy application until
+            APP_BROOKESIA_ENABLE is explicitly enabled.
+
+    config APP_BROOKESIA_ENABLE
+        bool "Enable ESP-Brookesia runtime"
+        default n
+        depends on APP_BROOKESIA_BUILD
+        help
+            Start ESP-Brookesia runtime and migrate hardware ownership.
+            Keep disabled while the staged migration is being validated.
+
     config EXAMPLE_SDMMC_BUS_WIDTH_4
         bool "SDMMC 4-line mode"
         default y

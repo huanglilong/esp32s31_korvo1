@@ -90,6 +90,12 @@ CONFIG_CODEC_I2C_BACKWARD_COMPATIBLE=n
 
 # Audio Simple Player resample dest rate — 16kHz per BSP recommendation
 CONFIG_AUDIO_SIMPLE_PLAYER_RESAMPLE_DEST_RATE=16000
+
+# LVGL filesystem drive letters required by ESP-Brookesia GUI components
+CONFIG_LV_FS_STDIO_LETTER=65
+CONFIG_LV_FS_POSIX_LETTER=65
+CONFIG_LV_FS_DEFAULT_DRIVER_LETTER=65
+
 # Channel converter: required for mono→stereo conversion.
 # Without this, mono MP3 files play at 2x speed because the I2S codec
 # is configured for stereo but receives mono data (each sample consumed

@@ -5,7 +5,12 @@
   - 芯片版本: ESP32-S31NRV16 / ESP32-S31NRV32, CPU 主频 320 MHz
   - 详细硬件信息: [doc/esp32s31_korvo1_hardware_info.md](doc/esp32s31_korvo1_hardware_info.md)
 
-### Official BSP Component
+### ESP-Brookesia master (v0.8) 基线
+
+ESP32-S31 使用 esp-brookesia 的 **master 分支（v0.8）**，要求 ESP-IDF **v6.2**。当前工程已加入 Display/Audio/Video Service 与 LVGL 组件的编译边界，并配置 LVGL 文件系统盘符；`APP_BROOKESIA_ENABLE` 默认关闭，因此现有 WiFi、音频、Camera 驱动仍是硬件资源唯一所有者。
+
+> 注意：Brookesia HAL Boards 当前依赖 `esp_board_manager 0.5.*`，本工程生成的 board-manager 代码使用 0.6.x，HAL/系统所有权切换需单独完成版本适配后再启用。
+
 
 - [espressif/esp32_s31_korvo_1](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1) (Board Support Package) — v1.0.0~1
   - 源码: [esp-bsp/bsp/esp32_s31_korvo_1](https://github.com/espressif/esp-bsp/tree/master/bsp/esp32_s31_korvo_1)
@@ -101,7 +106,7 @@
 
 ### ESP-IDF
 
-- Version: **v6.x**
+- Version: **v6.2**（ESP32-S31 preview target）
 - Build, Flash and Monitor:
   - Linux:
     ```bash

@@ -158,10 +158,10 @@ esp32s31_korvo1/
 
 | 框架 | 用途 |
 |------|------|
-| **ESP-IDF v6.x** | 基础开发框架 |
+- **ESP-IDF v6.2** | 基础开发框架（ESP32-S31 preview target） |
 | **esp32_s31_korvo_1 BSP** (v1.0.0~1) | [官方板级支持包](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1), 提供 Display/LVGL/Touch/Buttons/Audio/SDCARD/LED/Camera 驱动 |
 | **ESP-Skainet** | AI 语音助手 SDK (语音唤醒 + 命令词识别) |
-| **ESP-Brookesia** | HMI 人机交互框架 (图形 UI, LVGL) |
+| **ESP-Brookesia master (v0.8)** | 组件化 HMI/Service/GUI 基线；ESP32-S31 要求 ESP-IDF 6.2，当前先编译服务与 LVGL 公共层，硬件所有权暂由现有驱动保持 |
 | **ESP-GMF** | 通用多媒体框架 (音视频管道) |
 | **ESP-Matter** | Matter + Thread 智能家居协议 |
 | **esp_board_manager** | 板载外设管理组件 |

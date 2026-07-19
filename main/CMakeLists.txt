@@ -87,6 +87,18 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/git_info.h
 "#define GIT_MSG    \"${PROJECT_GIT_MSG}\"\n"
 )
 
+set(MAIN_REQUIRES
+    nvs_flash esp_wifi mdns cjson esp_http_server fatfs
+    uorb ulog esp_audio_simple_player
+    wifi_manager captive_dns esp_video
+)
+
+if(CONFIG_APP_BROOKESIA_BUILD)
+    list(APPEND MAIN_REQUIRES
+         brookesia_service_display brookesia_service_audio
+         brookesia_service_video brookesia_gui_lvgl)
+endif()
+
 idf_component_register(
     SRCS "wifi_service.cpp" "main.cpp"
          
@@ -101,6 +113,7 @@ idf_component_register(
          "drivers/system_monitor/system_monitor.cpp"
          "app_video.c"
          "logger/logger.cpp"
+         "brookesia_integration.cpp"
          "generated/wifi_state.cpp"
          "generated/volume_state.cpp"
          "generated/audio_level.cpp"
@@ -113,9 +126,7 @@ idf_component_register(
          "generated/system_alert.cpp"
          "generated/uORBTopics.cpp"
     INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/display" "drivers/system_monitor" "logger"
-    REQUIRES nvs_flash esp_wifi mdns cjson esp_http_server fatfs
-             uorb ulog esp_audio_simple_player
-             wifi_manager captive_dns esp_video
+    REQUIRES ${MAIN_REQUIRES}
     PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash esp_lcd_touch esp_driver_ppa
 )
 
