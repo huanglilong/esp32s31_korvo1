@@ -95,6 +95,10 @@ set(MAIN_REQUIRES
 
 if(CONFIG_APP_BROOKESIA_BUILD)
     list(APPEND MAIN_REQUIRES
+         brookesia_hal_boards brookesia_hal_adaptor
+         brookesia_service_manager
+         brookesia_service_helper
+         brookesia_runtime_manager
          brookesia_service_display brookesia_service_audio
          brookesia_service_video brookesia_gui_lvgl)
 endif()
@@ -114,6 +118,7 @@ idf_component_register(
          "app_video.c"
          "logger/logger.cpp"
          "brookesia_integration.cpp"
+         "brookesia_app.cpp"
          "generated/wifi_state.cpp"
          "generated/volume_state.cpp"
          "generated/audio_level.cpp"

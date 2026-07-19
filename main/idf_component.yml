@@ -1,8 +1,6 @@
 dependencies:
-  # Brookesia master/v0.8 from local checkout (GitHub is unreachable in this network).
-  # The Brookesia HAL (brookesia_hal_boards/adaptor) requires esp_board_manager 0.5.*,
-  # but our project uses 0.6.x. HAL components are NOT pulled in by the services below
-  # (they are only used by the runtime/system layer), so the version mismatch is deferred.
+  # Brookesia master/v0.8 from local checkout (GitHub unreachable in this network).
+  # HAL version requirement fixed in local clone: 0.5.* → >=0.6.0
   espressif/brookesia_service_display:
     path: /home/llhuang/works/opensource/esp-brookesia/service/media/brookesia_service_display
   espressif/brookesia_service_audio:
@@ -11,6 +9,14 @@ dependencies:
     path: /home/llhuang/works/opensource/esp-brookesia/service/media/brookesia_service_video
   espressif/brookesia_gui_lvgl:
     path: /home/llhuang/works/opensource/esp-brookesia/gui/brookesia_gui_lvgl
+  espressif/brookesia_hal_boards:
+    path: /home/llhuang/works/opensource/esp-brookesia/hal/brookesia_hal_boards
+  espressif/brookesia_hal_adaptor:
+    path: /home/llhuang/works/opensource/esp-brookesia/hal/brookesia_hal_adaptor
+  espressif/brookesia_service_manager:
+    path: /home/llhuang/works/opensource/esp-brookesia/service/framework/brookesia_service_manager
+  espressif/brookesia_service_helper:
+    path: /home/llhuang/works/opensource/esp-brookesia/service/framework/brookesia_service_helper
 
   espressif/mdns:
     version: ^1.0
@@ -32,4 +38,6 @@ dependencies:
     path: ${IDF_PATH}/examples/common_components/protocol_examples_common
   idf:
     version: '>=5.3'
+  espressif/brookesia_runtime_manager:
+    path: /home/llhuang/works/opensource/esp-brookesia/runtime/brookesia_runtime_manager
   espressif/esp_board_manager: '>=0.6.0'

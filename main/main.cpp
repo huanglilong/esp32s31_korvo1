@@ -26,6 +26,7 @@
 #include "nvs.h"
 #include "esp_netif.h"
 #include "esp_mac.h"
+#include "brookesia_app.hpp"
 #include "mdns.h"
 #include "lwip/apps/netbiosns.h"
 
@@ -450,6 +451,12 @@ extern "C" void app_main(void) {
         ESP_LOGW(TAG, "Display driver not available (LCD subboard not connected?)");
     }
 
+    /* 11b. Start Brookesia runtime (if APP_BROOKESIA_ENABLE=y) */
+    if (brookesia_app_start()) {
+        ESP_LOGI(TAG, "Brookesia runtime started -- Brookesia now owns display");
+        /* When Brookesia takes over, skip the legacy Camera App preview */
+        display_ret = -1;  /* Signal Camera App to skip */
+    }
     /* 12. Initialize Camera App (camera streaming to LCD, optional) */
     if (display_ret == 0 && cam_ret == 0) {
         ESP_LOGI(TAG, "Initializing Camera App...");

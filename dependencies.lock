@@ -34,6 +34,66 @@ dependencies:
       path: ../../opensource/esp-brookesia/gui/brookesia_gui_lvgl
       type: local
     version: 0.8.0
+  espressif/brookesia_hal_adaptor:
+    dependencies:
+    - name: espressif/brookesia_hal_interface
+      override_path: ../brookesia_hal_interface
+      require: public
+      version: 0.8.*
+    - matches:
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_SYSTEM_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_SYSTEM_ENABLE_BOARD_INFO_IMPL} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_SYSTEM_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_SYSTEM_ENABLE_OTA_UPDATER_IMPL} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_AUDIO_DEVICE} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_VIDEO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_VIDEO_ENABLE_CAMERA_IMPL} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_DISPLAY_DEVICE} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_STORAGE_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_STORAGE_ENABLE_FILE_SYSTEM_IMPL} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_STORAGE_FILE_SYSTEM_ENABLE_SPIFFS} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_STORAGE_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_STORAGE_ENABLE_FILE_SYSTEM_IMPL} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_STORAGE_FILE_SYSTEM_ENABLE_SDCARD} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_POWER_DEVICE} == True
+      name: espressif/esp_board_manager
+      version: '>=0.6.0,<0.7.0'
+    - matches:
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_AUDIO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_AUDIO_ENABLE_PROCESSOR_IMPL} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_VIDEO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_VIDEO_ENABLE_ENCODER_IMPL} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_VIDEO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_VIDEO_ENABLE_DECODER_IMPL} == True
+      name: espressif/media_lib_sal
+      version: 0.9.3
+    - matches:
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_AUDIO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_AUDIO_ENABLE_PROCESSOR_IMPL} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_VIDEO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_VIDEO_ENABLE_ENCODER_IMPL} == True
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_VIDEO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_VIDEO_ENABLE_DECODER_IMPL} == True
+      name: jason-mao/av_processor
+      version: 0.6.*
+    - matches:
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_VIDEO_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_VIDEO_ENABLE_CAMERA_IMPL} == True
+      name: espressif/esp_video
+      version: 2.2.*
+    - matches:
+      - if: target in [esp32p4] && $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_WIFI_DEVICE} == True
+      name: espressif/esp_wifi_remote
+      require: no
+      version: '>=0.10,<2.0'
+    - matches:
+      - if: target in [esp32p4] && $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_WIFI_DEVICE} == True
+      name: espressif/esp_hosted
+      require: no
+      version: 2.12.3
+    - matches:
+      - if: $CONFIG{BROOKESIA_HAL_ADAPTOR_ENABLE_STORAGE_DEVICE} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_STORAGE_ENABLE_FILE_SYSTEM_IMPL} == True && $CONFIG{BROOKESIA_HAL_ADAPTOR_STORAGE_FILE_SYSTEM_ENABLE_LITTLEFS} == True
+      name: joltwallet/littlefs
+      version: 1.*
+    source:
+      path: ../../opensource/esp-brookesia/hal/brookesia_hal_adaptor
+      type: local
+    version: 0.8.1
+  espressif/brookesia_hal_boards:
+    dependencies:
+    - name: espressif/esp_board_manager
+      require: public
+      version: '>=0.6.0,<0.7.0'
+    source:
+      path: ../../opensource/esp-brookesia/hal/brookesia_hal_boards
+      type: local
+    version: 0.8.0
   espressif/brookesia_hal_interface:
     dependencies:
     - name: espressif/brookesia_lib_utils
@@ -56,6 +116,16 @@ dependencies:
       version: 0.6.*
     source:
       path: ../../opensource/esp-brookesia/utils/brookesia_lib_utils
+      type: local
+    version: 0.8.0
+  espressif/brookesia_runtime_manager:
+    dependencies:
+    - name: espressif/brookesia_lib_utils
+      override_path: ../../utils/brookesia_lib_utils
+      require: public
+      version: 0.8.*
+    source:
+      path: ../../opensource/esp-brookesia/runtime/brookesia_runtime_manager
       type: local
     version: 0.8.0
   espressif/brookesia_service_audio:
@@ -911,8 +981,13 @@ dependencies:
     version: '*'
 direct_dependencies:
 - espressif/brookesia_gui_lvgl
+- espressif/brookesia_hal_adaptor
+- espressif/brookesia_hal_boards
+- espressif/brookesia_runtime_manager
 - espressif/brookesia_service_audio
 - espressif/brookesia_service_display
+- espressif/brookesia_service_helper
+- espressif/brookesia_service_manager
 - espressif/brookesia_service_video
 - espressif/cjson
 - espressif/esp32_s31_korvo_1
@@ -925,6 +1000,6 @@ direct_dependencies:
 - espressif/mdns
 - idf
 - protocol_examples_common
-manifest_hash: 44a2f4081e9935c7df0bf21340d38785df62482ca8df7bad1cc30eeb1cd35ca4
+manifest_hash: 4f688b1c153a488c0ae798848466da10d123373ea59d41fee27587814f981b16
 target: esp32s31
 version: 3.0.0
