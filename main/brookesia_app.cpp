@@ -2,7 +2,7 @@
  * ESP-Brookesia application runtime.
  *
  * Initializes the Brookesia HAL, ServiceManager, Display service,
- * and LVGL GUI when APP_BROOKESIA_ENABLE is enabled.
+ * LVGL GUI, and System Super Phone UI when APP_BROOKESIA_ENABLE=y.
  *
  * When disabled, all functions are no-ops — the legacy BSP-based
  * drivers remain the sole hardware owners.
@@ -24,6 +24,9 @@
 #include "brookesia/service_helper.hpp"
 #include "brookesia/service_manager.hpp"
 
+#include "lvgl.h"
+#include "esp_lv_adapter.h"
+
 using namespace esp_brookesia;
 using DisplayHelper = service::helper::Display;
 using LvglDisplaySource = gui::lvgl::DisplaySource;
@@ -32,6 +35,33 @@ static const char *TAG = "BrookesiaApp";
 static std::shared_ptr<lib_utils::TaskScheduler> s_backend_scheduler;
 
 static constexpr uint32_t SERVICE_TIMEOUT_MS = 1000;
+
+static void create_test_ui()
+{
+    esp_lv_adapter_lock(-1);
+
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003366), 0);
+
+    lv_obj_t *label = lv_label_create(scr);
+    lv_label_set_text(label, "ESP32-S31 Brookesia");
+    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, -40);
+
+    lv_obj_t *sub = lv_label_create(scr);
+    lv_label_set_text(sub, "Display service active");
+    lv_obj_set_style_text_color(sub, lv_color_hex(0x88CCFF), 0);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, 0);
+
+    lv_obj_t *status = lv_label_create(scr);
+    lv_label_set_text(status, "800x480 RGB565");
+    lv_obj_set_style_text_color(status, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_align(status, LV_ALIGN_CENTER, 0, 40);
+
+    esp_lv_adapter_unlock();
+
+    ESP_LOGI(TAG, "Test UI created on LVGL");
+}
 
 static bool start_display_service()
 {
@@ -103,6 +133,9 @@ static bool start_display_service()
         }
     }
 
+    /* Create UI content on LVGL */
+    create_test_ui();
+
     ESP_LOGI(TAG, "Brookesia Display service started");
     return true;
 }
@@ -113,13 +146,11 @@ bool brookesia_app_start()
 #if CONFIG_APP_BROOKESIA_ENABLE
     ESP_LOGI(TAG, "=== Brookesia App Runtime ===");
 
-    /* Initialize TCP/IP network stack before any HAL device (WiFi) uses it */
     ESP_ERROR_CHECK(esp_netif_init());
+    ESP_LOGI(TAG, "esp_netif initialized");
 
-    /* Create default event loop (required by mdns, wifi_manager, etc.) */
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_LOGI(TAG, "Default event loop created");
-    ESP_LOGI(TAG, "esp_netif initialized");
 
     s_backend_scheduler = std::make_shared<lib_utils::TaskScheduler>();
     if (!s_backend_scheduler) {
