@@ -1,22 +1,23 @@
 dependencies:
+  # Brookesia master/v0.8 from components/esp-brookesia/ (patched copy, editable)
   espressif/brookesia_service_display:
-    path: /home/llhuang/works/opensource/esp-brookesia/service/media/brookesia_service_display
+    path: ../components/esp-brookesia/service/media/brookesia_service_display
   espressif/brookesia_service_audio:
-    path: /home/llhuang/works/opensource/esp-brookesia/service/media/brookesia_service_audio
+    path: ../components/esp-brookesia/service/media/brookesia_service_audio
   espressif/brookesia_service_video:
-    path: /home/llhuang/works/opensource/esp-brookesia/service/media/brookesia_service_video
+    path: ../components/esp-brookesia/service/media/brookesia_service_video
   espressif/brookesia_gui_lvgl:
-    path: /home/llhuang/works/opensource/esp-brookesia/gui/brookesia_gui_lvgl
+    path: ../components/esp-brookesia/gui/brookesia_gui_lvgl
   espressif/brookesia_hal_boards:
-    path: /home/llhuang/works/opensource/esp-brookesia/hal/brookesia_hal_boards
+    path: ../components/esp-brookesia/hal/brookesia_hal_boards
   espressif/brookesia_hal_adaptor:
-    path: /home/llhuang/works/opensource/esp-brookesia/hal/brookesia_hal_adaptor
+    path: ../components/esp-brookesia/hal/brookesia_hal_adaptor
   espressif/brookesia_service_manager:
-    path: /home/llhuang/works/opensource/esp-brookesia/service/framework/brookesia_service_manager
+    path: ../components/esp-brookesia/service/framework/brookesia_service_manager
   espressif/brookesia_service_helper:
-    path: /home/llhuang/works/opensource/esp-brookesia/service/framework/brookesia_service_helper
+    path: ../components/esp-brookesia/service/framework/brookesia_service_helper
   espressif/brookesia_runtime_manager:
-    path: /home/llhuang/works/opensource/esp-brookesia/runtime/brookesia_runtime_manager
+    path: ../components/esp-brookesia/runtime/brookesia_runtime_manager
 
   espressif/mdns:
     version: ^1.0

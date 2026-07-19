@@ -6,7 +6,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/gui/brookesia_gui_interface
+      path: components/esp-brookesia/gui/brookesia_gui_interface
       type: local
     version: 0.8.0
   espressif/brookesia_gui_lvgl:
@@ -31,7 +31,7 @@ dependencies:
       require: private
       version: 0.6.*
     source:
-      path: ../../opensource/esp-brookesia/gui/brookesia_gui_lvgl
+      path: components/esp-brookesia/gui/brookesia_gui_lvgl
       type: local
     version: 0.8.0
   espressif/brookesia_hal_adaptor:
@@ -52,7 +52,7 @@ dependencies:
       name: espressif/esp_board_manager
       version: '>=0.6.0,<0.7.0'
     source:
-      path: ../../opensource/esp-brookesia/hal/brookesia_hal_adaptor
+      path: components/esp-brookesia/hal/brookesia_hal_adaptor
       type: local
     version: 0.8.1
   espressif/brookesia_hal_boards:
@@ -61,7 +61,7 @@ dependencies:
       require: public
       version: '>=0.6.0,<0.7.0'
     source:
-      path: ../../opensource/esp-brookesia/hal/brookesia_hal_boards
+      path: components/esp-brookesia/hal/brookesia_hal_boards
       type: local
     version: 0.8.0
   espressif/brookesia_hal_interface:
@@ -71,7 +71,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/hal/brookesia_hal_interface
+      path: components/esp-brookesia/hal/brookesia_hal_interface
       type: local
     version: 0.8.0
   espressif/brookesia_lib_utils:
@@ -85,7 +85,7 @@ dependencies:
       require: public
       version: 0.6.*
     source:
-      path: ../../opensource/esp-brookesia/utils/brookesia_lib_utils
+      path: components/esp-brookesia/utils/brookesia_lib_utils
       type: local
     version: 0.8.0
   espressif/brookesia_runtime_manager:
@@ -95,7 +95,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/runtime/brookesia_runtime_manager
+      path: components/esp-brookesia/runtime/brookesia_runtime_manager
       type: local
     version: 0.8.0
   espressif/brookesia_service_audio:
@@ -109,7 +109,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/service/media/brookesia_service_audio
+      path: components/esp-brookesia/service/media/brookesia_service_audio
       type: local
     version: 0.8.0
   espressif/brookesia_service_display:
@@ -123,7 +123,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/service/media/brookesia_service_display
+      path: components/esp-brookesia/service/media/brookesia_service_display
       type: local
     version: 0.8.0
   espressif/brookesia_service_helper:
@@ -137,7 +137,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/service/framework/brookesia_service_helper
+      path: components/esp-brookesia/service/framework/brookesia_service_helper
       type: local
     version: 0.8.0
   espressif/brookesia_service_manager:
@@ -147,7 +147,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/service/framework/brookesia_service_manager
+      path: components/esp-brookesia/service/framework/brookesia_service_manager
       type: local
     version: 0.8.0
   espressif/brookesia_service_storage:
@@ -157,7 +157,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/service/system/brookesia_service_storage
+      path: components/esp-brookesia/service/system/brookesia_service_storage
       type: local
     version: 0.8.0
   espressif/brookesia_service_video:
@@ -171,7 +171,7 @@ dependencies:
       require: public
       version: 0.8.*
     source:
-      path: ../../opensource/esp-brookesia/service/media/brookesia_service_video
+      path: components/esp-brookesia/service/media/brookesia_service_video
       type: local
     version: 0.8.0
   espressif/button:
@@ -970,6 +970,6 @@ direct_dependencies:
 - espressif/mdns
 - idf
 - protocol_examples_common
-manifest_hash: 1e27251126149ee5868ad4e0d7701ae7fa53ed9480d92b6d44118ec511c60051
+manifest_hash: 3b00215e00632a1ddd9f3900d2139311285e2613acc176f897d3d1d8e4a789b5
 target: esp32s31
 version: 3.0.0
