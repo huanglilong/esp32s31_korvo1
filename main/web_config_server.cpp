@@ -1611,6 +1611,7 @@ static esp_err_t _api_play_status(httpd_req_t *req) {
 
 /* GET /api/files/list?dir=/ */
 static esp_err_t _api_files_list(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
     if (!SDCardDriver::instance().available()) {
         httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK;
     }
