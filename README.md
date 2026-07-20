@@ -116,6 +116,19 @@
     $ idf.py build && idf.py flash -b 1500000 -p $(bash -c "ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null | head -1") monitor
     ```
 
+### WiFi AP 模式连接 (首次配网)
+
+设备首次启动时（无已保存的 WiFi 凭证），自动进入 **AP 模式**（SoftAP），创建热点 `esp-s31-XXXXXX`（密码为空）。
+
+1. 用手机或电脑连接热点 `esp-s31-XXXXXX`
+2. 连接后，浏览器访问以下任一地址进入 Web 配置页面：
+   - **http://192.168.4.1:8080/** — AP 模式固定 IP（推荐）
+   - **http://esp-web.local:8080/** — mDNS 域名（需客户端支持 mDNS/Bonjour）
+3. 在 Web 页面扫描并连接目标 WiFi，连接成功后设备自动切换为 STA+AP 模式
+4. STA 模式下仍可通过 **http://esp-web.local:8080/** 或 **http://esp-web-XXXXXX.local:8080/** 访问
+
+> 💡 AP 模式下设备会自动启动 Captive Portal（DNS 劫持 + HTTP 302 重定向），部分手机连接后会自动弹出配网页面。
+
 ### Clean Build
 
 首次构建或需要完全重新生成依赖、配置和板级代码时：
@@ -137,9 +150,9 @@ $ idf.py build
 - **Audio Driver**: ES8389 立体声编解码器驱动, 使用 `esp_codec_dev` API, I2S 48kHz 16-bit 双工 (MCLK-less), 硬件音量控制 + PGA mic gain (50dB), AAC/ADTS 录音, uORB 音量状态发布
 - **SD Card**: SDIO 3.0 4-bit 模式, FATFS 文件系统, boot 时自动挂载
 - **Camera**: DVP OV3660 摄像头驱动 (optional, mutex 互斥控制), Camera App LCD 实时预览 (V4L2 + LVGL canvas)
-- **WiFi**: 内置 Wi-Fi 6 STA + SoftAP 模式, NVS 凭证持久化, SNTP 时间同步
-- **mDNS**: esp-web-XXXXXX.local 主机名, Web Config 服务广告
-- **Web Config Server**: HTTP port 8080, WiFi 扫描/连接 REST API, 音量控制, 系统信息
+- **WiFi**: 内置 Wi-Fi 6 STA + SoftAP 模式, NVS 凭证持久化, SNTP 时间同步; 首次启动 AP 模式热点 `esp-s31-XXXXXX` (无密码), Captive Portal 自动配网
+- **mDNS**: esp-web.local + esp-web-XXXXXX.local 主机名, Web Config 服务广告
+- **Web Config Server**: HTTP port 8080, WiFi 扫描/连接 REST API, 音量控制, 系统信息; AP 模式访问 http://192.168.4.1:8080/ , STA 模式访问 http://esp-web.local:8080/
 - **Logger**: 文本日志 (ESP_LOG → ring buffer → SD card /logs/app_NNNNNN.log, 含 git info 文件头)
 - **uORB**: PX4 风格 pub/sub 消息总线 (FreeRTOS queue), 10 个 topics
 - **ULog**: PX4 ULog 格式二进制日志 (SD 卡 .ulg 文件, 含 git branch/commit/author/date/msg, SNTP 同步后自动启动)
