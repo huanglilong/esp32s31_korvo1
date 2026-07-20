@@ -48,7 +48,7 @@
 #define LOG_DIR_NAME      "logs"
 #define LOG_FILE_PREFIX   "app_"
 #define LOG_FILE_SUFFIX   ".log"
-#define WRITER_TASK_STACK  4096
+#define WRITER_TASK_STACK  3072
 #define WRITER_TASK_PRIO   3
 #define WRITER_TASK_NAME   "logger_writer"
 #define MAX_LINE_LEN       512
@@ -78,6 +78,9 @@ static struct {
     std::atomic<bool> writer_running{false};
     TaskHandle_t     writer_task;
     std::atomic<bool> writer_exited{false};  /* set by writer task before vTaskDelete(NULL) */
+    /* Writer task uses internal SRAM stack (required for file I/O) */
+    StackType_t     *writer_stack;
+    StaticTask_t     writer_tcb;
     /* vprintf hook */
     vprintf_like_t   orig_vprintf;  /* saved original for UART */
 } s_log;
@@ -128,12 +131,29 @@ bool logger_init(const char *sd_base)
     s_log.bytes_written = 0;
     _rotate_file();
 
-    /* Start writer task */
+    /* Start writer task — uses internal SRAM stack for SD card file I/O.
+     * With FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=y, xTaskCreate would allocate
+     * from PSRAM, which is unsafe for flash/filesystem operations. */
     s_log.writer_running = true;
     s_log.writer_exited = false;
-    if (xTaskCreatePinnedToCore(_logger_writer_task, WRITER_TASK_NAME,
-                    WRITER_TASK_STACK, NULL,
-                    WRITER_TASK_PRIO, &s_log.writer_task, 0) != pdPASS) {  /* Core 0 */
+    s_log.writer_stack = (StackType_t *)heap_caps_malloc(
+        WRITER_TASK_STACK * sizeof(StackType_t),
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!s_log.writer_stack) {
+        if (s_log.fd) { fclose(s_log.fd); s_log.fd = nullptr; }
+        vSemaphoreDelete(s_log.buf_mutex); s_log.buf_mutex = nullptr;
+        vSemaphoreDelete(s_log.data_sem);  s_log.data_sem = nullptr;
+        free(s_log.buf);
+        s_log.buf = nullptr;
+        return false;
+    }
+    s_log.writer_task = xTaskCreateStaticPinnedToCore(
+        _logger_writer_task, WRITER_TASK_NAME,
+        WRITER_TASK_STACK, NULL,
+        WRITER_TASK_PRIO, s_log.writer_stack, &s_log.writer_tcb, 0);  /* Core 0 */
+    if (s_log.writer_task == NULL) {
+        heap_caps_free(s_log.writer_stack);
+        s_log.writer_stack = nullptr;
         if (s_log.fd) { fclose(s_log.fd); s_log.fd = nullptr; }
         vSemaphoreDelete(s_log.buf_mutex); s_log.buf_mutex = nullptr;
         vSemaphoreDelete(s_log.data_sem);  s_log.data_sem = nullptr;
@@ -207,6 +227,11 @@ void logger_deinit(void)
     if (s_log.data_sem)  { vSemaphoreDelete(s_log.data_sem);  s_log.data_sem = nullptr; }
     free(s_log.buf);
     s_log.buf = nullptr;
+    /* Free internal SRAM stack */
+    if (s_log.writer_stack) {
+        heap_caps_free(s_log.writer_stack);
+        s_log.writer_stack = nullptr;
+    }
 }
 
 void logger_set_sd_level(logger_level_t level)

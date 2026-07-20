@@ -176,6 +176,8 @@ CONFIG_UNITY_ENABLE_IDF_TEST_RUNNER=n
 CONFIG_ESP_EVENT_LOOP_IN_EXT_RAM=y
 # System monitor task stack (4KB → 2KB) — lightweight sampling task
 CONFIG_APP_SYS_MONITOR_TASK_STACK=2048
+# Timer task stack — reduced from 3584 to 2560 (plenty for timer callbacks)
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=2560
 # System event task stack must be ≥ 3072 for Brookesia WiFi HAL
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=3072
 # Push most heap allocations to PSRAM (only allocations ≤ 256 bytes stay in internal SRAM)

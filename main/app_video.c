@@ -14,6 +14,7 @@
 #include <sys/errno.h>
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <inttypes.h>
 #include "linux/videodev2.h"
 #include "esp_video_init.h"
@@ -24,7 +25,7 @@ static const char *TAG = "app_video";
 
 #define MAX_BUFFER_COUNT                (6)
 #define MIN_BUFFER_COUNT                (2)
-#define VIDEO_TASK_STACK_SIZE           (4 * 1024)
+#define VIDEO_TASK_STACK_SIZE           (3 * 1024)
 #define VIDEO_TASK_PRIORITY             (4)
 
 typedef struct {
@@ -39,6 +40,10 @@ typedef struct {
     TaskHandle_t video_stream_task_handle;
     bool video_task_delete;
     SemaphoreHandle_t video_stop_sem;
+    /* Internal SRAM stack for video stream task (camera DMA operations
+     * may disable cache; PSRAM stack is unsafe in that context). */
+    StackType_t *video_task_stack;
+    StaticTask_t video_task_tcb;
 } app_video_t;
 
 static app_video_t app_camera_video;
@@ -342,6 +347,11 @@ static void video_stream_task(void *arg)
                          consecutive_failures);
                 video_stream_stop(video_fd);
                 xSemaphoreGive(app_camera_video.video_stop_sem);
+                /* Free internal SRAM stack before self-delete */
+                if (app_camera_video.video_task_stack) {
+                    heap_caps_free(app_camera_video.video_task_stack);
+                    app_camera_video.video_task_stack = NULL;
+                }
                 vTaskDelete(NULL);
             }
             // Back off before retrying to avoid busy-looping
@@ -364,6 +374,11 @@ static void video_stream_task(void *arg)
                 ESP_LOGE(TAG, "Failed to stop video stream on task exit");
             }
             xSemaphoreGive(app_camera_video.video_stop_sem);
+            /* Free internal SRAM stack before self-delete */
+            if (app_camera_video.video_task_stack) {
+                heap_caps_free(app_camera_video.video_task_stack);
+                app_camera_video.video_task_stack = NULL;
+            }
             vTaskDelete(NULL);
         }
 
@@ -379,10 +394,24 @@ esp_err_t app_video_stream_task_start(int video_fd, int core_id)
 {
     video_stream_start(video_fd);
 
-    BaseType_t result = xTaskCreatePinnedToCore(video_stream_task, "video stream task", VIDEO_TASK_STACK_SIZE, &video_fd,
-                        VIDEO_TASK_PRIORITY, &app_camera_video.video_stream_task_handle, core_id);
+    /* Allocate internal SRAM stack for video stream task.
+     * Camera DMA operations may disable cache; PSRAM stack is unsafe. */
+    app_camera_video.video_task_stack = (StackType_t *)heap_caps_malloc(
+        VIDEO_TASK_STACK_SIZE * sizeof(StackType_t),
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!app_camera_video.video_task_stack) {
+        ESP_LOGE(TAG, "failed to allocate video task stack");
+        goto errout;
+    }
 
-    if (result != pdPASS) {
+    app_camera_video.video_stream_task_handle = xTaskCreateStaticPinnedToCore(
+        video_stream_task, "video stream task", VIDEO_TASK_STACK_SIZE,
+        &video_fd, VIDEO_TASK_PRIORITY,
+        app_camera_video.video_task_stack, &app_camera_video.video_task_tcb, core_id);
+
+    if (app_camera_video.video_stream_task_handle == NULL) {
+        heap_caps_free(app_camera_video.video_task_stack);
+        app_camera_video.video_task_stack = NULL;
         ESP_LOGE(TAG, "failed to create video stream task");
         goto errout;
     }

@@ -83,6 +83,10 @@ static std::atomic<bool>  s_is_recording{false};
 static esp_audio_enc_handle_t s_encoder = nullptr;
 static uint8_t       *s_enc_in_buf = NULL;    /* PCM accumulation buffer (encoder input) */
 static int            s_enc_in_size = 0;       /* Required input frame size (bytes) */
+
+/* Background task (web_cfg_bg): internal SRAM stack for ULog file I/O */
+static StackType_t   *s_bg_stack = NULL;
+static StaticTask_t   s_bg_tcb;
 static std::atomic<int> s_enc_in_count{0};    /* Accumulated PCM bytes (cross-task: written by audio_task, reset by API handler before task start) */
 static uint8_t       *s_enc_out_buf = NULL;   /* Encoder output buffer */
 static int            s_enc_out_size = 0;      /* Output buffer size */
@@ -2081,6 +2085,11 @@ static void _web_config_task(void *arg)
     }
 
     ESP_LOGI(TAG, "Web config background task exiting");
+    /* Free internal SRAM stack before self-delete */
+    if (s_bg_stack) {
+        heap_caps_free(s_bg_stack);
+        s_bg_stack = NULL;
+    }
     vTaskDelete(NULL);
 }
 
@@ -2120,10 +2129,24 @@ void web_config_server_start(void) {
     s_server_running.store(true, std::memory_order_release);
     ESP_LOGI(TAG, "Web config server started on port 8080");
 
-    /* Start background task for SNTP + ULog auto-start */
-    BaseType_t ret = xTaskCreate(_web_config_task, "web_cfg_bg",
-            4096, NULL, tskIDLE_PRIORITY + 2, NULL);
-    if (ret != pdPASS) {
+    /* Start background task for SNTP + ULog auto-start.
+     * Uses internal SRAM stack for ULog file I/O safety.
+     * With FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=y, xTaskCreate would allocate
+     * from PSRAM, which is unsafe for filesystem operations. */
+    s_bg_stack = (StackType_t *)heap_caps_malloc(
+        4096 * sizeof(StackType_t),
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!s_bg_stack) {
+        ESP_LOGE(TAG, "Failed to allocate bg task stack");
+        return;
+    }
+    TaskHandle_t bg_handle = xTaskCreateStaticPinnedToCore(
+        _web_config_task, "web_cfg_bg",
+        4096, NULL, tskIDLE_PRIORITY + 2,
+        s_bg_stack, &s_bg_tcb, 0);
+    if (bg_handle == NULL) {
+        heap_caps_free(s_bg_stack);
+        s_bg_stack = NULL;
         ESP_LOGE(TAG, "Failed to create web config background task");
     }
 }

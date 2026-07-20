@@ -11,6 +11,7 @@
 
 #include "esp_log.h"
 #include "esp_attr.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/ip4_addr.h"
@@ -26,6 +27,10 @@ static const char *TAG = "captive_dns";
 static _Atomic TaskHandle_t s_dns_task;
 static atomic_bool s_running;
 static captive_dns_config_t s_config;
+/* PSRAM-allocated stack for captive DNS task (pure network, no flash ops) */
+#define DNS_TASK_STACK_SIZE 3072
+static StackType_t *s_dns_stack = NULL;
+static StaticTask_t s_dns_tcb;
 
 static esp_err_t captive_dns_get_redirect_ip(uint32_t *redirect_ip)
 {
@@ -128,6 +133,7 @@ static void dns_task(void *arg)
     if (sock < 0) {
         atomic_store_explicit(&s_running, false, memory_order_release);
         atomic_store_explicit(&s_dns_task, NULL, memory_order_release);
+        if (s_dns_stack) { heap_caps_free(s_dns_stack); s_dns_stack = NULL; }
         vTaskDelete(NULL);
         return;
     }
@@ -141,6 +147,7 @@ static void dns_task(void *arg)
         close(sock);
         atomic_store_explicit(&s_running, false, memory_order_release);
         atomic_store_explicit(&s_dns_task, NULL, memory_order_release);
+        if (s_dns_stack) { heap_caps_free(s_dns_stack); s_dns_stack = NULL; }
         vTaskDelete(NULL);
         return;
     }
@@ -153,6 +160,7 @@ static void dns_task(void *arg)
         close(sock);
         atomic_store_explicit(&s_running, false, memory_order_release);
         atomic_store_explicit(&s_dns_task, NULL, memory_order_release);
+        if (s_dns_stack) { heap_caps_free(s_dns_stack); s_dns_stack = NULL; }
         vTaskDelete(NULL);
         return;
     }
@@ -176,6 +184,7 @@ static void dns_task(void *arg)
     close(sock);
     ESP_LOGI(TAG, "Captive DNS stopped");
     atomic_store_explicit(&s_dns_task, NULL, memory_order_release);
+    if (s_dns_stack) { heap_caps_free(s_dns_stack); s_dns_stack = NULL; }
     vTaskDelete(NULL);
 }
 
@@ -229,9 +238,21 @@ esp_err_t captive_dns_start(const captive_dns_config_t *config)
     }
 
     atomic_store_explicit(&s_running, true, memory_order_release);
-    TaskHandle_t task_handle = NULL;
-    BaseType_t ret = xTaskCreate(dns_task, "captive_dns", 3072, NULL, 5, &task_handle);
-    if (ret != pdPASS) {
+    /* Allocate PSRAM stack for DNS task (pure network, no flash operations) */
+    s_dns_stack = (StackType_t *)heap_caps_malloc(
+        DNS_TASK_STACK_SIZE * sizeof(StackType_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_dns_stack) {
+        atomic_store_explicit(&s_running, false, memory_order_release);
+        atomic_store_explicit(&s_dns_task, NULL, memory_order_release);
+        return ESP_FAIL;
+    }
+    TaskHandle_t task_handle = xTaskCreateStaticPinnedToCore(
+        dns_task, "captive_dns", DNS_TASK_STACK_SIZE,
+        NULL, 5, s_dns_stack, &s_dns_tcb, tskNO_AFFINITY);
+    if (task_handle == NULL) {
+        heap_caps_free(s_dns_stack);
+        s_dns_stack = NULL;
         atomic_store_explicit(&s_running, false, memory_order_release);
         atomic_store_explicit(&s_dns_task, NULL, memory_order_release);
         return ESP_FAIL;

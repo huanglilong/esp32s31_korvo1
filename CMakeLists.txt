@@ -8,6 +8,17 @@ list(APPEND EXTRA_COMPONENT_DIRS
      "${CMAKE_SOURCE_DIR}/components/esp-brookesia/service/network/brookesia_service_wifi"
 )
 
+# Move LVGL's 64KB memory pool from internal SRAM .bss to PSRAM.
+# Uses LV_MEM_POOL_ALLOC macro to allocate from PSRAM via heap_caps_malloc,
+# bypassing the static work_mem_int[] array in .bss. Saves ~64KB of DIRAM.
+# This approach avoids linker script conflicts with ESP32-S31's shared bus.
+# The lvgl_psram_mem.h header is in main/ and provides the allocator function.
+include_directories(${CMAKE_SOURCE_DIR}/main)
+add_compile_options(
+    -DLV_MEM_POOL_INCLUDE=\"lvgl_psram_mem.h\"
+    -DLV_MEM_POOL_ALLOC=lvgl_psram_alloc
+)
+
 project(esp32s31_korvo1)
 
 # ─────────────────────────────────────────────────────────────────
