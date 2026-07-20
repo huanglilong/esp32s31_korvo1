@@ -122,18 +122,32 @@ bool SystemMonitor::start(void)
 
     _task_exited.store(false, std::memory_order_release);
 
-    BaseType_t ret = xTaskCreatePinnedToCore(
+    /* Allocate task stack from PSRAM to conserve internal SRAM.
+     * sys_monitor is a low-priority sampling task — PSRAM latency is acceptable. */
+    const uint32_t stack_words = CONFIG_APP_SYS_MONITOR_TASK_STACK;
+    _task_stack = (StackType_t *)heap_caps_malloc(stack_words * sizeof(StackType_t),
+                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!_task_stack) {
+        ESP_LOGE(TAG, "Failed to allocate PSRAM stack for monitor task");
+        _running.store(false, std::memory_order_relaxed);
+        return false;
+    }
+
+    _task_handle = xTaskCreateStaticPinnedToCore(
         _monitor_task_func,
         "sys_monitor",
-        CONFIG_APP_SYS_MONITOR_TASK_STACK,
+        stack_words,
         this,
         1,  /* Low priority — must not interfere with real-time tasks */
-        &_task_handle,
+        _task_stack,
+        &_task_tcb,
         1   /* Pin to core 1 (core 0 reserved for camera/HTTP/NPU/SDIO) */
     );
 
-    if (ret != pdPASS) {
+    if (!_task_handle) {
         ESP_LOGE(TAG, "Failed to create monitor task");
+        heap_caps_free(_task_stack);
+        _task_stack = nullptr;
         _running.store(false, std::memory_order_relaxed);
         return false;
     }
@@ -167,6 +181,12 @@ void SystemMonitor::stop(void)
                      max_wait_ms);
         }
         _task_handle = nullptr;
+    }
+
+    /* Free PSRAM-allocated stack (xTaskCreateStatic does not free it). */
+    if (_task_stack) {
+        heap_caps_free(_task_stack);
+        _task_stack = nullptr;
     }
 
     ESP_LOGI(TAG, "Stopped");

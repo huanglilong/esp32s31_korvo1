@@ -72,22 +72,28 @@ CONFIG_BROOKESIA_SERVICE_WIFI_CONNECT_RETRIES_MAX=3
 CONFIG_BROOKESIA_SERVICE_WIFI_AUTO_CONNECT_DELAY_MS=2000
 CONFIG_BROOKESIA_HAL_ADAPTOR_WIFI_SOFTAP_CHANNEL_DEFAULT=1
 
-# LWIP TCP
-CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
-CONFIG_LWIP_TCP_WND_DEFAULT=32768
-CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
-CONFIG_LWIP_MAX_SOCKETS=28
-CONFIG_LWIP_MAX_ACTIVE_TCP=40
-CONFIG_LWIP_MAX_LISTENING_TCP=24
+# LWIP TCP — reduced for internal SRAM savings
+# TCP snd_buf/wnd 32KB→16KB: web config server only handles small JSON, 16KB is plenty.
+# Each active TCP connection allocates snd_buf from internal heap; reducing saves ~16KB per conn.
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
+CONFIG_LWIP_TCP_WND_DEFAULT=16384
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+# Max sockets/connections reduced: 28 sockets is overkill for an embedded device.
+# 16 sockets, 16 active TCP, 8 listening TCP is sufficient for STA+AP + HTTP server.
+CONFIG_LWIP_MAX_SOCKETS=16
+CONFIG_LWIP_MAX_ACTIVE_TCP=16
+CONFIG_LWIP_MAX_LISTENING_TCP=8
 
 # HTTP Server
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 CONFIG_HTTPD_ERR_RESP_NO_DELAY=y
 
-# mDNS
+# mDNS — allow PSRAM allocation to save internal SRAM (~5 KB)
 CONFIG_MDNS_MAX_SERVICES=8
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
+CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
 
 # ULog
 CONFIG_ULOG_ENABLE=y
@@ -130,22 +136,61 @@ CONFIG_LV_DRAW_SW_ASM_RISCV_V=y
 
 # Allocate WiFi/LWIP from PSRAM to save SRAM
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# P0: WiFi buffer optimization — reduce static buffers to save internal SRAM
+# Static RX/TX buffers are always in internal SRAM; reducing count frees SRAM directly.
+# Cache TX 16→8: further 12.5 KB saving; 8 is sufficient for STA+AP with modest traffic.
+# Dynamic RX must be >= RX_BA_WIN (16); keep at 16 to avoid compile error.
+CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP32_WIFI_STATIC_TX_BUFFER_NUM=8
+CONFIG_ESP32_WIFI_CACHE_TX_BUFFER_NUM=8
+CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+# Note: Dynamic TX buffers (type=1) are disabled by Kconfig when
+# SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y and SPIRAM_IGNORE_NOTFOUND is not set.
+# The IDF prevents this combination to avoid PSRAM allocation issues with TX buffers.
+# Keeping static TX buffers (type=0) is the safe choice with PSRAM WiFi/LWIP.
+# P2a: Disable Ethernet — Korvo-1 has no EMAC PHY, saves ~15 KB SRAM + ~30 KB Flash
+CONFIG_ETH_USE_ESP32_EMAC=n
+CONFIG_ETH_USE_SPI_ETHERNET=n
+# P2b: Disable IEEE 802.15.4 (Zigbee/Thread) — not used on Korvo-1, saves ~5 KB SRAM
+CONFIG_IEEE802154_ENABLED=n
+# P2c: MbedTLS optimization — reduce SRAM/Flash footprint
+# SSL input buffer 16KB→4KB: our HTTP client only receives small JSON responses
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
+# Reduce certificate bundle from 200→128: saves ~15 KB Flash (cacrt_all.pem has 121 certs)
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_MAX_CERTS=128
+# Disable unused TLS features to save Flash/SRAM
+CONFIG_MBEDTLS_SSL_RENEGOTIATION=n
+CONFIG_MBEDTLS_SSL_ALL_ALERT_MESSAGES=n
+CONFIG_MBEDTLS_SELF_TEST=n
+CONFIG_MBEDTLS_ERROR_STRINGS=n
+# Disable unused cipher modes (keep GCM for TLS 1.2, CTR for AES-CTR;
+# XTS needed for flash encryption, keep it; CBC needed by wpa_supplicant for WiFi)
+CONFIG_MBEDTLS_CIPHER_MODE_CFB=n
+CONFIG_MBEDTLS_CIPHER_MODE_OFB=n
+# P3: Disable Unity test framework in production build, saves ~3 KB
+CONFIG_UNITY_ENABLE_FLOAT=n
+CONFIG_UNITY_ENABLE_DOUBLE=n
+CONFIG_UNITY_ENABLE_IDF_TEST_RUNNER=n
+
 # Move event loop data to PSRAM
 CONFIG_ESP_EVENT_LOOP_IN_EXT_RAM=y
-# System monitor task stack (4KB → 3KB)
-CONFIG_APP_SYS_MONITOR_TASK_STACK=3072
+# System monitor task stack (4KB → 2KB) — lightweight sampling task
+CONFIG_APP_SYS_MONITOR_TASK_STACK=2048
 # System event task stack must be ≥ 3072 for Brookesia WiFi HAL
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=3072
-# Push most heap allocations to PSRAM (only allocations ≤ 512 bytes stay in internal SRAM)
-# This is the single most impactful change for internal SRAM pressure.
+# Push most heap allocations to PSRAM (only allocations ≤ 256 bytes stay in internal SRAM)
+# This is the single most impactful config for internal SRAM pressure.
 # At 4096, almost all malloc() calls went to internal SRAM, consuming 299 KB quickly.
-# 256 was too aggressive — some internal allocations (>256B) from audio encoder
-# and other components need DMA-capable memory and crash when going to PSRAM.
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
-# Reduce reserve pool for DMA/internal allocations from 32KB to 16KB
-# since our main DMA users (I2S, SDMMC, Camera) use modest buffers,
+# At 512, internal SRAM was still at 86% (38 KB free of 283 KB).
+# At 256, more allocations go to PSRAM — only small structs stay in internal SRAM.
+# Risk: some DMA-capable allocations >256B may land in PSRAM; if they crash,
+# increase back to 512 and use heap_caps_malloc(MALLOC_CAP_DMA) for those.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256
+# Reduce reserve pool for DMA/internal allocations from 16KB to 8KB
+# since our main DMA users (I2S, SDMMC, Camera) use PSRAM-allocated buffers
+# with PSRAM DMA capability (CONFIG_SOC_PSRAM_DMA_CAPABLE=y),
 # and WiFi/LWIP is already in PSRAM.
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=8192
 
 # --- Board-specific configuration (from esp_board_manager board_manager.defaults) ---
 # Board: esp32_s31_korvo1

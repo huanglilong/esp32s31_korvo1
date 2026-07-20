@@ -41,6 +41,7 @@
 #include <atomic>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include "uorb.h"
 #include "generated/system_stats.h"
 #include "generated/system_alert.h"
@@ -116,6 +117,10 @@ private:
 
     /** Background task handle. */
     TaskHandle_t _task_handle{nullptr};
+
+    /** PSRAM-allocated stack for monitor task (xTaskCreateStatic). */
+    StaticTask_t _task_tcb{};
+    StackType_t *_task_stack{nullptr};
 
     /** Running flag (atomic for cross-core safety). */
     std::atomic<bool> _running{false};

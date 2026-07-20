@@ -33,8 +33,8 @@ dependencies:
     version: ^1.0.0~1
   espressif/esp_video:
     version: ^2.2
-  protocol_examples_common:
-    path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+  # Note: protocol_examples_common removed — it pulls in ethernet_init which we don't need.
+  # If you need example WiFi connect helpers, add it back, but it adds ~15 KB SRAM overhead.
   idf:
     version: '>=5.3'
   espressif/esp_board_manager: '>=0.6.0'
