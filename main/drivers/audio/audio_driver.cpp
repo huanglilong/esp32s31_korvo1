@@ -18,6 +18,18 @@
 #include "nvs.h"
 #include <cstring>
 
+/* esp_board_manager headers — only used by detect_brookesia_audio().
+ * These define dev_audio_codec_config_t etc. which conflict with our
+ * local definitions in audio_driver.hpp. We only need the manager API
+ * and the device name macros here, not the type definitions. */
+#include "esp_board_manager.h"
+#include "esp_board_manager_defs.h"
+
+/* Forward-declare the board_manager's handle type for pointer casting.
+ * We only need to extract esp_codec_dev_handle_t from it. */
+struct dev_audio_codec_handles_bm;
+
+
 #include "app_config.h"
 #include "topics.h"
 
@@ -219,6 +231,125 @@ cleanup:
     }
     xSemaphoreGive(_lifecycle_mutex);
     return -1;
+}
+
+/*============================================================================
+ * Detect audio codec already initialized by Brookesia/esp_board_manager
+ *============================================================================*/
+int AudioDriver::detect_brookesia_audio() {
+    if (_refcount.load(std::memory_order_relaxed) > 0) {
+        ESP_LOGI(TAG, "AudioDriver already initialized");
+        return 0;
+    }
+
+    if (!_lifecycle_mutex) return -1;
+    xSemaphoreTake(_lifecycle_mutex, portMAX_DELAY);
+
+    if (_refcount.load(std::memory_order_relaxed) > 0) {
+        xSemaphoreGive(_lifecycle_mutex);
+        return 0;
+    }
+
+    /* Initialize and retrieve DAC handle from esp_board_manager.
+     * Brookesia's AudioCodecPlayerImpl only initializes the DAC when its
+     * service is bound/used (lazy init). We need to explicitly init it
+     * here so the web API can access it. */
+    void *dac_bm_handle = nullptr;
+
+    if (!esp_board_manager_check_name(ESP_BOARD_DEVICE_NAME_AUDIO_DAC)) {
+        ESP_LOGW(TAG, "Audio DAC device not registered in board manager");
+        xSemaphoreGive(_lifecycle_mutex);
+        return -1;
+    }
+
+    esp_err_t ret = esp_board_manager_init_device_by_name(ESP_BOARD_DEVICE_NAME_AUDIO_DAC);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Audio DAC init failed: %s", esp_err_to_name(ret));
+        xSemaphoreGive(_lifecycle_mutex);
+        return -1;
+    }
+
+    ret = esp_board_manager_get_device_handle(
+        ESP_BOARD_DEVICE_NAME_AUDIO_DAC, &dac_bm_handle);
+    if (ret != ESP_OK || !dac_bm_handle) {
+        ESP_LOGW(TAG, "Audio DAC not available from esp_board_manager");
+        xSemaphoreGive(_lifecycle_mutex);
+        return -1;
+    }
+
+    /* Initialize and retrieve ADC handle from esp_board_manager */
+    void *adc_bm_handle = nullptr;
+    if (esp_board_manager_check_name(ESP_BOARD_DEVICE_NAME_AUDIO_ADC)) {
+        ret = esp_board_manager_init_device_by_name(ESP_BOARD_DEVICE_NAME_AUDIO_ADC);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Audio ADC init failed: %s", esp_err_to_name(ret));
+        } else {
+            ret = esp_board_manager_get_device_handle(
+                ESP_BOARD_DEVICE_NAME_AUDIO_ADC, &adc_bm_handle);
+            if (ret != ESP_OK || !adc_bm_handle) {
+                ESP_LOGW(TAG, "Audio ADC handle not available");
+                adc_bm_handle = nullptr;
+            }
+        }
+    }
+
+    /* Both board_manager and our local dev_audio_codec_handles_t have
+     * codec_dev as the first field (esp_codec_dev_handle_t), so the
+     * layout is compatible for extracting codec_dev. */
+    auto *dac_handles = reinterpret_cast<dev_audio_codec_handles_t *>(dac_bm_handle);
+    auto *adc_handles = adc_bm_handle
+        ? reinterpret_cast<dev_audio_codec_handles_t *>(adc_bm_handle)
+        : nullptr;
+
+    if (!dac_handles->codec_dev) {
+        ESP_LOGW(TAG, "Audio DAC codec_dev is NULL");
+        xSemaphoreGive(_lifecycle_mutex);
+        return -1;
+    }
+
+    /* Allocate our handles struct */
+    dev_audio_codec_handles_t *h = new(std::nothrow) dev_audio_codec_handles_t();
+    if (!h) {
+        ESP_LOGE(TAG, "Failed to allocate handles");
+        xSemaphoreGive(_lifecycle_mutex);
+        return -1;
+    }
+    memset(h, 0, sizeof(*h));
+
+    h->codec_dev = dac_handles->codec_dev;
+    h->mic_dev = adc_handles ? adc_handles->codec_dev : nullptr;
+
+    _handles.store(h, std::memory_order_release);
+
+    /* Create codec mutex for thread-safe codec ops */
+    SemaphoreHandle_t mtx = xSemaphoreCreateMutex();
+    if (!mtx) {
+        ESP_LOGE(TAG, "Codec mutex create failed");
+        delete h;
+        _handles.store(nullptr, std::memory_order_release);
+        xSemaphoreGive(_lifecycle_mutex);
+        return -1;
+    }
+    _codec_mutex.store(mtx, std::memory_order_release);
+
+    /* Restore volume from NVS */
+    {
+        nvs_handle_t nvs_h;
+        if (nvs_open(NVS_NAMESPACE_SETTINGS, NVS_READONLY, &nvs_h) == ESP_OK) {
+            int32_t saved_vol = VOLUME_DEFAULT;
+            nvs_get_i32(nvs_h, NVS_KEY_VOLUME, &saved_vol);
+            nvs_close(nvs_h);
+            set_volume((int)saved_vol);
+        } else {
+            set_volume(_volume.load(std::memory_order_relaxed));
+        }
+    }
+
+    _refcount.store(1, std::memory_order_relaxed);
+    xSemaphoreGive(_lifecycle_mutex);
+
+    ESP_LOGI(TAG, "AudioDriver detected (Brookesia/esp_board_manager, ES8389 DAC+ADC)");
+    return 0;
 }
 
 void AudioDriver::deinit() {

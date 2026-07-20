@@ -15,6 +15,7 @@
 #include "bsp/esp32_s31_korvo_1.h"
 #include "app_config.h"
 #include <sys/stat.h>
+#include <dirent.h>
 #include <cstring>
 
 static const char *TAG = "SDCardDriver";
@@ -109,6 +110,67 @@ int SDCardDriver::init(dev_fs_fat_config_t *cfg, int cfg_size, void **handle) {
     }
 
     if (handle) *handle = fs_handle;
+    xSemaphoreGive(_init_mutex);
+    return 0;
+}
+
+/*============================================================================
+ * Detect already-mounted SD card (e.g. by Brookesia/esp_board_manager)
+ *============================================================================*/
+int SDCardDriver::detect_mount() {
+    if (_initialized.load(std::memory_order_relaxed)) {
+        ESP_LOGI(TAG, "SD card already initialized");
+        return 0;
+    }
+
+    if (!_init_mutex) return -1;
+    xSemaphoreTake(_init_mutex, portMAX_DELAY);
+
+    if (_initialized.load(std::memory_order_relaxed)) {
+        xSemaphoreGive(_init_mutex);
+        return 0;
+    }
+
+    /* Check if the mount point directory exists (indicating VFS is registered) */
+    struct stat st;
+    if (stat(SDMMC_MOUNT_POINT, &st) != 0) {
+        ESP_LOGW(TAG, "SD card mount point %s not accessible", SDMMC_MOUNT_POINT);
+        xSemaphoreGive(_init_mutex);
+        return -1;
+    }
+
+    /* Try to open the mount point directory to verify VFS is actually working */
+    DIR *dir = opendir(SDMMC_MOUNT_POINT);
+    if (!dir) {
+        ESP_LOGW(TAG, "SD card mount point %s exists but not readable", SDMMC_MOUNT_POINT);
+        xSemaphoreGive(_init_mutex);
+        return -1;
+    }
+    closedir(dir);
+
+    /* SD card is mounted by another subsystem (Brookesia/esp_board_manager).
+     * Create a minimal handle so available() returns true. */
+    dev_fs_fat_handle_t *fs_handle = new(std::nothrow) dev_fs_fat_handle_t();
+    if (!fs_handle) {
+        ESP_LOGE(TAG, "Failed to allocate handle");
+        xSemaphoreGive(_init_mutex);
+        return -1;
+    }
+    memset(fs_handle, 0, sizeof(*fs_handle));
+    fs_handle->mount_point = (char *)SDMMC_MOUNT_POINT;
+
+    /* Try to get the sdmmc_card_t handle from BSP (may return NULL if
+     * Brookesia used esp_board_manager directly instead of BSP) */
+    fs_handle->card = bsp_sdcard_get_handle();
+
+    _handles.store(fs_handle, std::memory_order_release);
+    _initialized.store(true, std::memory_order_release);
+
+    ESP_LOGI(TAG, "SD card detected at %s (mounted by Brookesia/esp_board_manager)", SDMMC_MOUNT_POINT);
+    if (fs_handle->card) {
+        sdmmc_card_print_info(stdout, fs_handle->card);
+    }
+
     xSemaphoreGive(_init_mutex);
     return 0;
 }

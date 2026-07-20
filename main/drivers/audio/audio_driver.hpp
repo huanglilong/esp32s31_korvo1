@@ -112,6 +112,23 @@ public:
      */
     int init(dev_audio_codec_config_t *cfg, int cfg_size, void **handle);
 
+    /**
+     * @brief  Detect audio codec already initialized by Brookesia/esp_board_manager.
+     *
+     * Retrieves DAC and ADC codec handles from esp_board_manager (which were
+     * initialized by Brookesia's AudioCodecPlayerImpl/RecorderImpl during
+     * ServiceManager startup). Populates AudioDriver handles so that
+     * available() returns true and codec operations work.
+     *
+     * This is used when Brookesia owns the hardware and has already
+     * initialized the audio codec via esp_board_manager.
+     *
+     * Idempotent. Thread-safe.
+     *
+     * @return 0 on success, -1 on failure
+     */
+    int detect_brookesia_audio();
+
     /** Deinitialize audio (refcounted). Thread-safe.
      *  Waits for in-flight codec operations before tearing down. */
     void deinit();

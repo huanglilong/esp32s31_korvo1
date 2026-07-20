@@ -362,16 +362,32 @@ extern "C" void app_main(void) {
     int btn_ret = -1;
     int led_ret = -1;
 
+    /* 4. Mount SD card */
     if (!s_brookesia_owns_hardware) {
-    /* 4. Mount SD card (config-driven) */
-    int sd_ret = SDCardDriver::instance().init(&s_sdcard_cfg, sizeof(s_sdcard_cfg), &sdcard_handle);
-    sd_ok = (sd_ret == 0);
-    if (sd_ok) {
-        ESP_LOGI(TAG, "SD card mounted");
+        /* Mount SD card via BSP (config-driven) */
+        int sd_ret = SDCardDriver::instance().init(&s_sdcard_cfg, sizeof(s_sdcard_cfg), &sdcard_handle);
+        sd_ok = (sd_ret == 0);
+        if (sd_ok) {
+            ESP_LOGI(TAG, "SD card mounted");
+        } else {
+            ESP_LOGW(TAG, "SD card not available — audio playback/storage disabled");
+        }
     } else {
-        ESP_LOGW(TAG, "SD card not available — audio playback/storage disabled");
+        /* Brookesia owns hardware — detect already-mounted SD card.
+         * Brookesia's StorageFileSystemImpl mounts the SD card via
+         * esp_board_manager during ServiceManager startup. We detect
+         * the existing mount so SDCardDriver::available() returns true
+         * and web API endpoints can access the SD card. */
+        int sd_ret = SDCardDriver::instance().detect_mount();
+        sd_ok = (sd_ret == 0);
+        if (sd_ok) {
+            ESP_LOGI(TAG, "SD card detected (mounted by Brookesia)");
+        } else {
+            ESP_LOGW(TAG, "SD card not available — Brookesia did not mount it");
+        }
     }
 
+    if (!s_brookesia_owns_hardware) {
     /* 5. Initialize audio driver (config-driven) */
     audio_ret = AudioDriver::instance().init(&s_audio_cfg, sizeof(s_audio_cfg), &audio_handle);
     if (audio_ret == 0) {
@@ -404,7 +420,15 @@ extern "C" void app_main(void) {
         ESP_LOGW(TAG, "LED driver not available");
     }
     } else {
-        ESP_LOGI(TAG, "Brookesia owns audio/display/input hardware — skipping legacy peripheral drivers");
+        /* Brookesia owns audio/display/input hardware — detect audio codec
+         * already initialized by Brookesia's AudioCodecPlayerImpl/RecorderImpl
+         * via esp_board_manager, so web API audio endpoints work. */
+        audio_ret = AudioDriver::instance().detect_brookesia_audio();
+        if (audio_ret == 0) {
+            ESP_LOGI(TAG, "Audio driver detected (Brookesia)");
+        } else {
+            ESP_LOGW(TAG, "Audio driver not available from Brookesia");
+        }
     }
 
     /* 6. WiFi service — managed by Brookesia ServiceManager.

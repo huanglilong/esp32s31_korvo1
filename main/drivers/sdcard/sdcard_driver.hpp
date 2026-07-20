@@ -84,6 +84,20 @@ public:
      */
     int init(dev_fs_fat_config_t *cfg, int cfg_size, void **handle);
 
+    /**
+     * @brief  Detect an already-mounted SD card (e.g. mounted by Brookesia/esp_board_manager).
+     *
+     * Checks if the VFS mount point exists and is accessible. If so, marks
+     * the driver as initialized without calling bsp_sdcard_mount() again.
+     * This is used when Brookesia owns the hardware and has already mounted
+     * the SD card via esp_board_manager.
+     *
+     * Idempotent. Thread-safe.
+     *
+     * @return 0 on success (SD card detected), -1 on failure (not mounted)
+     */
+    int detect_mount();
+
     /** No-op — SD card is never unmounted after init. */
     void deinit();
 
