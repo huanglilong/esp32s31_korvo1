@@ -8,6 +8,14 @@ dependencies:
     version: "0.8.*"
     override_path: ../../system/brookesia_service_storage
     require: public
+  espressif/brookesia_service_helper:
+    version: "0.8.*"
+    override_path: ../../framework/brookesia_service_helper
+    require: public
+  espressif/brookesia_hal_adaptor:
+    version: "0.8.*"
+    override_path: ../../../hal/brookesia_hal_adaptor
+    require: public
 
 examples:
   - path: ../../../examples/agent/chatbot

@@ -2,19 +2,20 @@
 
 /**
  * @file wifi_service.hpp
- * @brief Thin C++ facade over the wifi_manager component.
+ * @brief Thin C++ facade over the Brookesia WiFi service.
  *
- * Wraps wifi_manager C API, manages uORB wifi_state publication,
- * SNTP startup, and NVS credential persistence. Provides a unified
- * WiFi service with captive portal support.
+ * Wraps the Brookesia service_wifi helper API, providing a simplified
+ * interface for the web config server and main app. Preserves the same
+ * public API as the legacy wifi_manager-based implementation.
+ *
+ * WiFi lifecycle (init/start/connect) is managed entirely by the
+ * Brookesia ServiceManager via auto-registered plugin. This class
+ * only queries state and triggers actions through the service helper.
  *
  * Usage:
- *   1. At boot: WifiService::instance().init() — initializes wifi_manager.
- *   2. WifiService::instance().start() — reads NVS credentials, starts
- *      wifi_manager in STA+AP mode.
- *   3. From UI/Web: scan(), connect(ssid, pass), getStatus().
- *   4. WifiService publishes uORB wifi_state automatically via
- *      the wifi_manager state callback.
+ *   1. Brookesia ServiceManager auto-starts WiFi service at boot.
+ *   2. From UI/Web: scan(), connect(ssid, pass), get_status().
+ *   3. SNTP is managed separately by the web_config_server task.
  */
 
 #include <atomic>
@@ -25,7 +26,6 @@
 #include "freertos/event_groups.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
-#include "uorb.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,25 +60,23 @@ class WifiService {
 public:
     static WifiService& instance();
 
-    /* One-time init: init wifi_manager, register state callback for
-     * uORB wifi_state publishing. Must be called before start(). */
+    /* No-op init — Brookesia ServiceManager handles WiFi lifecycle.
+     * Kept for API compatibility; always returns ESP_OK. */
     esp_err_t init();
 
-    /* Start WiFi with NVS-stored credentials. If NVS has no SSID,
-     * starts in AP-only mode (provisioning). Returns immediately;
-     * connection status available via get_status() or uORB. */
+    /* No-op start — Brookesia ServiceManager handles WiFi lifecycle.
+     * Kept for API compatibility; always returns ESP_OK. */
     esp_err_t start();
 
     /* Blocking scan: populates |results| (max WIFI_SERVICE_SCAN_MAX records).
      * Returns actual count via |out_count|. */
     esp_err_t scan(wifi_scan_result_t *results, uint16_t *out_count);
 
-    /* Connect to a new network. Saves to NVS before connecting so
-     * credentials persist even if the network is temporarily unavailable. */
+    /* Connect to a new network. Triggers Brookesia WiFi service
+     * SetConnectAp + TriggerGeneralAction(Connect). */
     esp_err_t connect(const char *ssid, const char *password);
 
-    /* Disconnect from current network. STA interface is stopped
-     * but AP keeps running for provisioning. */
+    /* Disconnect from current network. */
     esp_err_t disconnect();
 
     /* Get current status snapshot (thread-safe). */
@@ -88,11 +86,11 @@ public:
      * Returns ESP_OK on connect, ESP_ERR_TIMEOUT on timeout. */
     esp_err_t wait_connected(uint32_t timeout_ms);
 
-    /* Get the wifi_manager's AP netif (for captive_dns). */
+    /* Get the AP netif — returns nullptr (Brookesia manages netif internally).
+     * Kept for API compatibility. */
     void *get_ap_netif();
 
-    /* Hot-swap STA credentials at runtime (no restart required).
-     * Saves to NVS immediately. Reconnects with new config. */
+    /* Hot-swap STA credentials at runtime (no restart required). */
     esp_err_t apply_sta_config(const char *ssid, const char *password);
 
     /* Whether SNTP has been started (called once after first IP). */
@@ -114,28 +112,16 @@ private:
 
     static void _state_callback(bool connected, void *user_ctx);
 
-    /* Read NVS credentials into ssid_out/pass_out. Returns true if
-     * SSID is non-empty (STA mode), false if no stored credentials. */
-    bool _read_nvs_creds(char *ssid_out, size_t ssid_size,
-                         char *pass_out, size_t pass_size);
+    /* Check if Brookesia WiFi service is available and running. */
+    bool _is_service_ready() const;
 
-    /* Save credentials to NVS. */
-    void _save_nvs_creds(const char *ssid, const char *password);
+    /* Read current STA info from Brookesia WiFi service. */
+    void _read_sta_info(wifi_service_status_t *status);
 
-    /* Publish uORB wifi_state message. Thread-safe. */
-    void _publish_wifi_state(bool connected, const char *ssid, int8_t rssi);
-
-    std::atomic<bool> _initialized{false};
-    std::atomic<bool> _started{false};
+    std::atomic<bool> _initialized{true};   /* Always true — Brookesia manages init */
+    std::atomic<bool> _started{true};       /* Always true — Brookesia manages start */
     std::atomic<bool> _sntp_started{false};
     std::atomic<bool> _sntp_synced{false};
-    std::atomic<bool> _captive_dns_started{false};
-
-    /* uORB wifi_state publisher */
-    std::atomic<orb_advert_t> _wifi_state_pub{ORB_ADVERT_INVALID};
-
-    StaticSemaphore_t _scan_mutex_buf;
-    SemaphoreHandle_t _scan_mutex{nullptr};
 
     char _current_ssid[33] = {};
 };

@@ -90,7 +90,7 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/git_info.h
 set(MAIN_REQUIRES
     nvs_flash esp_wifi mdns cjson esp_http_server fatfs
     uorb ulog esp_audio_simple_player
-    wifi_manager captive_dns esp_video
+    esp_video
 )
 
 if(CONFIG_APP_BROOKESIA_BUILD)
@@ -100,7 +100,8 @@ if(CONFIG_APP_BROOKESIA_BUILD)
          brookesia_service_helper
          brookesia_runtime_manager
          brookesia_service_display brookesia_service_audio
-         brookesia_service_video brookesia_gui_lvgl)
+         brookesia_service_video brookesia_service_wifi
+         brookesia_gui_lvgl)
 endif()
 
 idf_component_register(
@@ -132,7 +133,7 @@ idf_component_register(
          "generated/uORBTopics.cpp"
     INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/display" "drivers/system_monitor" "logger"
     REQUIRES ${MAIN_REQUIRES}
-    PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash esp_lcd_touch esp_driver_ppa esp_lvgl_adapter
+    PRIV_REQUIRES esp_driver_i2s esp_driver_sdmmc esp_driver_i2c spi_flash esp_lcd_touch esp_driver_ppa esp_lvgl_adapter brookesia_service_wifi
 )
 
 target_include_directories(${COMPONENT_LIB} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

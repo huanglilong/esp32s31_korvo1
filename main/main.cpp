@@ -407,10 +407,11 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "Brookesia owns audio/display/input hardware — skipping legacy peripheral drivers");
     }
 
-    /* 6. Initialize WiFi service (always runs — critical for web provisioning and testing).
-     * Runs regardless of Brookesia ownership: WiFi is a network service, not a peripheral driver.
-     * Brookesia's WiFi HAL adaptor is available but our legacy WiFi service with captive portal
-     * provides the web config UI that powers the test suite. */
+    /* 6. WiFi service — managed by Brookesia ServiceManager.
+     * The service_wifi plugin auto-registers and starts via ServiceManager.
+     * WifiService::init()/start() are no-ops kept for API compatibility.
+     * Brookesia handles: WiFi init, STA connect (auto-load from NVS),
+     * SoftAP provisioning (captive portal), and reconnect. */
     ret = WifiService::instance().init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "WiFi service init failed: %s", esp_err_to_name(ret));
@@ -419,7 +420,7 @@ extern "C" void app_main(void) {
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "WiFi service start failed: %s", esp_err_to_name(ret));
         } else {
-            ESP_LOGI(TAG, "WiFi service started");
+            ESP_LOGI(TAG, "WiFi service started (via Brookesia ServiceManager)");
         }
     }
 

@@ -958,6 +958,7 @@ direct_dependencies:
 - espressif/brookesia_service_display
 - espressif/brookesia_service_helper
 - espressif/brookesia_service_manager
+- espressif/brookesia_service_storage
 - espressif/brookesia_service_video
 - espressif/cjson
 - espressif/esp32_s31_korvo_1
@@ -970,6 +971,6 @@ direct_dependencies:
 - espressif/mdns
 - idf
 - protocol_examples_common
-manifest_hash: 3b00215e00632a1ddd9f3900d2139311285e2613acc176f897d3d1d8e4a789b5
+manifest_hash: 315d213a22f79399d987b7c1fc54c8b4c5b0b2fa3cdc80a0a8ad397a2ccf7d8a
 target: esp32s31
 version: 3.0.0

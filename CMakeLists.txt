@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.22)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# Add Brookesia WiFi service to component search paths
+# (nested inside esp-brookesia/service/network/ — not auto-discovered)
+list(APPEND EXTRA_COMPONENT_DIRS
+     "${CMAKE_SOURCE_DIR}/components/esp-brookesia/service/network/brookesia_service_wifi"
+)
+
 project(esp32s31_korvo1)
 
 # ─────────────────────────────────────────────────────────────────

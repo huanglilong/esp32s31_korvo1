@@ -12,9 +12,11 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "esp_mac.h"
 
 #if CONFIG_APP_BROOKESIA_ENABLE
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,7 @@
 #include "brookesia/lib_utils.hpp"
 #include "brookesia/service_helper.hpp"
 #include "brookesia/service_manager.hpp"
+#include "brookesia/service_wifi.hpp"
 
 #include "lvgl.h"
 #include "esp_lv_adapter.h"
@@ -35,6 +38,8 @@ static const char *TAG = "BrookesiaApp";
 static std::shared_ptr<lib_utils::TaskScheduler> s_backend_scheduler;
 
 static constexpr uint32_t SERVICE_TIMEOUT_MS = 1000;
+
+using WifiHelper = esp_brookesia::service::helper::Wifi;
 
 static void create_test_ui()
 {
@@ -61,6 +66,155 @@ static void create_test_ui()
     esp_lv_adapter_unlock();
 
     ESP_LOGI(TAG, "Test UI created on LVGL");
+}
+
+static std::optional<esp_brookesia::service::ServiceBinding> s_wifi_binding;
+
+static bool start_wifi_service()
+{
+    ESP_LOGI(TAG, "Starting Brookesia WiFi service...");
+
+    if (!WifiHelper::is_available()) {
+        ESP_LOGE(TAG, "WiFi service is not available");
+        return false;
+    }
+
+    /* Bind the WiFi service — keep the binding alive so the service
+     * doesn't get unbound and stopped when the binding goes out of scope. */
+    s_wifi_binding.emplace(
+        service::ServiceManager::get_instance().bind(WifiHelper::get_name().data())
+    );
+    if (!s_wifi_binding->is_valid()) {
+        ESP_LOGE(TAG, "Failed to bind WiFi service");
+        s_wifi_binding.reset();
+        return false;
+    }
+
+    /* Set SoftAP params with fixed channel so SoftAP can start immediately
+     * without needing a scan for channel selection.
+     * SSID will use device MAC suffix for uniqueness. */
+    {
+        boost::json::object softap_params;
+        uint8_t mac[6] = {};
+        esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+        char ssid[24];
+        snprintf(ssid, sizeof(ssid), "esp-s31-%02x%02x%02x", mac[3], mac[4], mac[5]);
+        softap_params["ssid"] = std::string(ssid);
+        softap_params["password"] = std::string("");
+        softap_params["max_connection"] = 4;
+        softap_params["channel"] = 1;  /* Fixed channel 1 — no scan needed */
+
+        auto set_result = WifiHelper::call_function_sync(
+            WifiHelper::FunctionId::SetSoftApParams,
+            softap_params,
+            service::helper::Timeout(5000)
+        );
+        if (!set_result.has_value()) {
+            ESP_LOGW(TAG, "SetSoftApParams failed: %s", set_result.error().c_str());
+        }
+    }
+
+    /* Trigger Init action */
+    auto init_result = WifiHelper::call_function_sync(
+        WifiHelper::FunctionId::TriggerGeneralAction,
+        std::string("Init"),
+        service::helper::Timeout(10000)
+    );
+    if (!init_result.has_value()) {
+        ESP_LOGW(TAG, "WiFi Init action failed: %s", init_result.error().c_str());
+        return false;
+    }
+
+    /* Wait for WiFi to reach "Inited" state */
+    int retry = 0;
+    while (retry < 20) {
+        auto state_result = WifiHelper::call_function_sync<std::string>(
+            WifiHelper::FunctionId::GetGeneralState,
+            service::helper::Timeout(3000)
+        );
+        if (state_result.has_value() && state_result.value() == "Inited") {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+        retry++;
+    }
+    if (retry >= 20) {
+        ESP_LOGW(TAG, "WiFi Init timed out");
+        return false;
+    }
+    ESP_LOGI(TAG, "WiFi service initialized");
+
+    /* Trigger Start action */
+    auto start_result = WifiHelper::call_function_sync(
+        WifiHelper::FunctionId::TriggerGeneralAction,
+        std::string("Start"),
+        service::helper::Timeout(10000)
+    );
+    if (!start_result.has_value()) {
+        ESP_LOGW(TAG, "WiFi Start action failed: %s", start_result.error().c_str());
+        return false;
+    }
+
+    /* Wait for WiFi to reach "Started" state */
+    retry = 0;
+    while (retry < 20) {
+        auto state_result = WifiHelper::call_function_sync<std::string>(
+            WifiHelper::FunctionId::GetGeneralState,
+            service::helper::Timeout(3000)
+        );
+        if (state_result.has_value()) {
+            const auto &state = state_result.value();
+            if (state == "Started" || state == "Connected" || state == "Connecting") {
+                ESP_LOGI(TAG, "WiFi service started (state=%s)", state.c_str());
+                break;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+        retry++;
+    }
+    if (retry >= 20) {
+        ESP_LOGW(TAG, "WiFi Start timed out");
+        return false;
+    }
+
+    /* If no stored credentials, start SoftAP for first-time setup.
+     * Use TriggerSoftApStart instead of TriggerSoftApProvisionStart because
+     * the provision flow has a bug: the intentional STA disconnect at provision
+     * start triggers WIFI_EVENT_STA_DISCONNECTED, which is misidentified as a
+     * provision failure, causing immediate cleanup. SoftAP start alone works
+     * correctly — the AP is visible and the web config UI handles provisioning. */
+    auto state_result = WifiHelper::call_function_sync<std::string>(
+        WifiHelper::FunctionId::GetGeneralState,
+        service::helper::Timeout(3000)
+    );
+    if (state_result.has_value() && state_result.value() == "Started") {
+        auto ap_result = WifiHelper::call_function_sync<boost::json::object>(
+            WifiHelper::FunctionId::GetConnectAp,
+            service::helper::Timeout(3000)
+        );
+        bool has_credentials = false;
+        if (ap_result.has_value()) {
+            const auto &obj = ap_result.value();
+            auto it = obj.find("ssid");
+            has_credentials = (it != obj.end() && it->value().is_string() &&
+                              std::string(it->value().as_string()).length() > 0);
+        }
+
+        if (!has_credentials) {
+            ESP_LOGI(TAG, "No stored WiFi credentials — starting SoftAP");
+            auto softap_result = WifiHelper::call_function_sync(
+                WifiHelper::FunctionId::TriggerSoftApStart,
+                service::helper::Timeout(15000)
+            );
+            if (!softap_result.has_value()) {
+                ESP_LOGW(TAG, "SoftAP start failed: %s", softap_result.error().c_str());
+            } else {
+                ESP_LOGI(TAG, "SoftAP started — connect to WiFi hotspot to configure");
+            }
+        }
+    }
+
+    return true;
 }
 
 static bool start_display_service()
@@ -188,6 +342,10 @@ bool brookesia_app_start()
         return false;
     }
     ESP_LOGI(TAG, "ServiceManager started — Brookesia owns all HAL devices");
+
+    if (!start_wifi_service()) {
+        ESP_LOGW(TAG, "WiFi service unavailable — continuing without WiFi");
+    }
 
     if (!start_display_service()) {
         ESP_LOGW(TAG, "Display service unavailable — continuing without display");

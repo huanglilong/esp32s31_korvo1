@@ -17,6 +17,7 @@
 #include "brookesia/service_audio.hpp"
 #include "brookesia/service_display.hpp"
 #include "brookesia/service_video.hpp"
+#include "brookesia/service_wifi.hpp"
 #include "brookesia/hal_adaptor.hpp"
 #include "brookesia/service_manager.hpp"
 #include "brookesia/runtime_manager.hpp"
