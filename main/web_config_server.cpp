@@ -1511,7 +1511,9 @@ static esp_err_t _api_rec_status(httpd_req_t *req) {
 /* GET /api/audio/list */
 static esp_err_t _api_audio_list(httpd_req_t *req) {
     if (!SDCardDriver::instance().available()) {
-        httpd_resp_send_500(req); return ESP_FAIL;
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\",\"files\":[]}");
+        return ESP_OK;
     }
     DIR *d = opendir(SDMMC_MOUNT_POINT);
     cJSON *root = cJSON_CreateObject();
@@ -2028,6 +2030,7 @@ static void _web_config_task(void *arg)
         /* ── SNTP: start on first STA connect with IP ── */
         if (st.sta_connected && !s_sntp_initialized.load(std::memory_order_acquire)) {
             ESP_LOGI(TAG, "STA connected (IP=%s), starting SNTP...", st.sta_ip);
+            shared_mdns_update_delegate_ip();
             sntp_start_and_ulog_autostart();
         }
 
