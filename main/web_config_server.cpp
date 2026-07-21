@@ -1652,6 +1652,9 @@ static esp_err_t _api_files_list(httpd_req_t *req) {
     while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.') continue;
         char fpath[512]; snprintf(fpath, sizeof(fpath), "%s/%s", dir, e->d_name);
+        /* Defense-in-depth: verify the constructed path is still within /sdcard
+         * (prevents crafted directory names from escaping the mount point). */
+        if (strncmp(fpath, "/sdcard/", 8) != 0 && strcmp(fpath, "/sdcard") != 0) continue;
         struct stat st;
         bool is_dir = false; int64_t fsize = 0; time_t mtime = 0;
         if (stat(fpath, &st) == 0) { is_dir = S_ISDIR(st.st_mode); fsize = is_dir ? 0 : (int64_t)st.st_size; mtime = st.st_mtime; }
