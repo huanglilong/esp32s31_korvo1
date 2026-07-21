@@ -90,6 +90,7 @@ void LedDriver::deinit() {
 
     if (_led) {
         led_indicator_stop(_led, BSP_LED_OFF);
+        led_indicator_delete(_led);
         _led = nullptr;
     }
     _initialized.store(false, std::memory_order_relaxed);
