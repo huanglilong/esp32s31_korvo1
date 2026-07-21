@@ -1329,9 +1329,7 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
         if (!h) { heap_caps_free(s_audio_stack); s_audio_stack = NULL; s_audio_running = false; audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0}"); return ESP_OK; }
     }
 
-    /* Register and open AAC encoder */
-    esp_audio_enc_register_default();
-
+    /* Open AAC encoder */
     esp_aac_enc_config_t aac_cfg = ESP_AAC_ENC_CONFIG_DEFAULT();
     aac_cfg.sample_rate = 16000;
     aac_cfg.channel = 2;
@@ -2106,6 +2104,16 @@ void web_config_server_start(void) {
 
     _register_handlers(s_httpd);
     _add_mdns_service();
+
+    /* Register AAC encoder once — called from app_main() before any tasks exist,
+     * so no concurrency protection is needed (single-threaded at this point). */
+    {
+        static bool s_enc_registered = false;
+        if (!s_enc_registered) {
+            esp_audio_enc_register_default();
+            s_enc_registered = true;
+        }
+    }
 
     s_server_running.store(true, std::memory_order_release);
     ESP_LOGI(TAG, "Web config server started on port 8080");
