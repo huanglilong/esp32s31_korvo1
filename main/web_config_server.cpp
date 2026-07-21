@@ -238,14 +238,23 @@ static int _asp_out(uint8_t *d, int sz, void *_) {
     return AudioDriver::instance().codec_write(d, sz);
 }
 
-/* Playback event callback — tracks playing state */
+/* Playback event callback — tracks playing state.
+ * Must hold s_audio_mutex when writing to s_playing_file/s_playing
+ * to avoid data race with API handlers (try_lock, non-blocking). */
 static int _asp_evt(esp_asp_event_pkt_t *pkt, void *_) {
     (void)_;
     if (pkt->type == ESP_ASP_EVENT_TYPE_STATE) {
         int s = *(esp_asp_state_t*)pkt->payload;
         if (s == ESP_ASP_STATE_FINISHED || s == ESP_ASP_STATE_STOPPED || s == ESP_ASP_STATE_ERROR) {
-            s_playing_file[0] = '\0';
-            s_playing = false;
+            if (s_audio_mutex && xSemaphoreTake(s_audio_mutex, 0) == pdTRUE) {
+                s_playing_file[0] = '\0';
+                s_playing = false;
+                xSemaphoreGive(s_audio_mutex);
+            } else {
+                /* Mutex busy — another handler is stopping/starting playback.
+                 * The handler will clear state itself. Skip update to avoid
+                 * overwriting newer state. */
+            }
         }
     }
     return 0;
