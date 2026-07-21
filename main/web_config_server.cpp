@@ -1638,14 +1638,10 @@ static esp_err_t _api_files_list(httpd_req_t *req) {
 
     uint64_t total_kb = 0, free_kb = 0;
     {   /* Get filesystem capacity via fatfs */
-        DIR *d2 = opendir("/sdcard");
-        if (d2) {
-            FATFS *fs; DWORD free_clust;
-            if (f_getfree("", &free_clust, &fs) == FR_OK && fs) {
-                total_kb = (fs->n_fatent - 2) * fs->csize * fs->ssize / 1024;
-                free_kb = free_clust * fs->csize * fs->ssize / 1024;
-            }
-            closedir(d2);
+        FATFS *fs; DWORD free_clust;
+        if (f_getfree("", &free_clust, &fs) == FR_OK && fs) {
+            total_kb = (fs->n_fatent - 2) * fs->csize * fs->ssize / 1024;
+            free_kb = free_clust * fs->csize * fs->ssize / 1024;
         }
     }
 
