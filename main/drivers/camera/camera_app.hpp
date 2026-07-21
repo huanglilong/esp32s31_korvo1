@@ -116,7 +116,6 @@ private:
     std::atomic<bool>     _initialized;
     std::atomic<bool>     _streaming;
     bool                  _task_should_stop;   /* Protected by _mutex */
-    SemaphoreHandle_t     _task_stop_sem;       /* Signalled when task exits */
     TaskHandle_t          _task_handle;
 
     /* V4L2 */

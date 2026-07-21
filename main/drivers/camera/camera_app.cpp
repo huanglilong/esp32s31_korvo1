@@ -66,7 +66,6 @@ CameraApp::CameraApp() :
     _initialized(false),
     _streaming(false),
     _task_should_stop(false),
-    _task_stop_sem(nullptr),
     _task_handle(nullptr),
     _video_fd(-1),
     _frame_width(0),
@@ -267,7 +266,6 @@ int CameraApp::init() {
         return -1;
     }
 
-    _task_stop_sem = xSemaphoreCreateBinary();
     _initialized.store(true, std::memory_order_relaxed);
 
     xSemaphoreGive(_mutex);
@@ -335,10 +333,8 @@ int CameraApp::stop() {
     _task_should_stop = true;
     xSemaphoreGive(_mutex);
 
-    /* Wait for stream task to exit */
-    if (_task_stop_sem) {
-        xSemaphoreTake(_task_stop_sem, pdMS_TO_TICKS(5000));
-    }
+    /* Wait for stream task to exit via app_video (signals its own internal semaphore) */
+    app_video_wait_video_stop();
 
     _streaming.store(false, std::memory_order_relaxed);
 
@@ -407,11 +403,6 @@ void CameraApp::deinit() {
             heap_caps_free(_canvas_bufs[i]);
             _canvas_bufs[i] = nullptr;
         }
-    }
-
-    if (_task_stop_sem) {
-        vSemaphoreDelete(_task_stop_sem);
-        _task_stop_sem = nullptr;
     }
 
     _initialized.store(false, std::memory_order_relaxed);
