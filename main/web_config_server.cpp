@@ -1618,6 +1618,7 @@ static esp_err_t _api_play_status(httpd_req_t *req) {
 /* GET /api/files/list?dir=/ */
 static esp_err_t _api_files_list(httpd_req_t *req) {
     if (!SDCardDriver::instance().available()) {
+        httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"SD card not available\"}"); return ESP_OK;
     }
     char q[256] = {};
@@ -1629,10 +1630,11 @@ static esp_err_t _api_files_list(httpd_req_t *req) {
     _url_decode(raw_dir);
     char dir[256];
     if (!_path_sanitize(raw_dir, dir, sizeof(dir))) {
+        httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Invalid path\"}"); return ESP_OK;
     }
     DIR *d = opendir(dir);
-    if (!d) { httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Cannot open directory\"}"); return ESP_OK; }
+    if (!d) { httpd_resp_set_type(req, "application/json"); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Cannot open directory\"}"); return ESP_OK; }
 
     uint64_t total_kb = 0, free_kb = 0;
     {   /* Get filesystem capacity via fatfs */
