@@ -144,6 +144,6 @@ private:
     int64_t               _last_frame_us{0};  /* Frame throttle timestamp */
 
     /* uORB */
-    orb_advert_t          _pub_state;
-    orb_advert_t          _pub_fps;
+    std::atomic<orb_advert_t> _pub_state{ORB_ADVERT_INVALID};
+    std::atomic<orb_advert_t> _pub_fps{ORB_ADVERT_INVALID};
 };

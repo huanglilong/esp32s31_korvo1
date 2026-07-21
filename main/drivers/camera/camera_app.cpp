@@ -77,9 +77,7 @@ CameraApp::CameraApp() :
     _frame_count(0),
     _fps(0.0f),
     _fps_last_count(0),
-    _fps_last_time(0),
-    _pub_state(ORB_ADVERT_INVALID),
-    _pub_fps(ORB_ADVERT_INVALID)
+    _fps_last_time(0)
 {
     _mutex = xSemaphoreCreateMutex();
     _canvas_bufs[0] = nullptr;
@@ -565,16 +563,18 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t camera_buf_index,
         self._fps.store(fps, std::memory_order_relaxed);
 
         /* Publish fps_stats via uORB */
-        if (self._pub_fps < 0) {
-            self._pub_fps = orb_advertise(ORB_ID(fps_stats));
+        auto pub_fps = self._pub_fps.load(std::memory_order_relaxed);
+        if (pub_fps < 0) {
+            pub_fps = orb_advertise(ORB_ID(fps_stats));
+            self._pub_fps.store(pub_fps, std::memory_order_relaxed);
         }
-        if (self._pub_fps >= 0) {
+        if (pub_fps >= 0) {
             fps_stats_s fs = {};
             fs.timestamp = now;
             fs.frame_count = count;
             fs.fps = fps;
             fs.fps_total_bytes = 0; /* No JPEG encoding in this path */
-            orb_publish(ORB_ID(fps_stats), self._pub_fps, &fs);
+            orb_publish(ORB_ID(fps_stats), pub_fps, &fs);
         }
 
         self._fps_last_count = count;
