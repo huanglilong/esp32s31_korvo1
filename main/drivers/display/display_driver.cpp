@@ -85,8 +85,8 @@ int DisplayDriver::init() {
         .double_buffer = 0,
 #endif
         .flags = {
-            .buff_dma = true,
-            .buff_spiram = false,
+            .buff_dma = false,
+            .buff_spiram = true,
             .sw_rotate = false,
         }
     };

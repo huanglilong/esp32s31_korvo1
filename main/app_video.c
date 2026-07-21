@@ -14,6 +14,7 @@
 #include <sys/errno.h>
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <inttypes.h>
 #include "linux/videodev2.h"
 #include "esp_video_init.h"

@@ -31,6 +31,7 @@
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_sntp.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 #include "mdns.h"
 #include "nvs_flash.h"

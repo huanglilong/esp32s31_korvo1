@@ -15,6 +15,7 @@
 #include "logger.hpp"
 #include "sdkconfig.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "git_info.h"
 #include <cstdio>
 #include <cstring>
