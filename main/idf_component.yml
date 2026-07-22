@@ -18,5 +18,15 @@ dependencies:
   protocol_examples_common:
     path: ${IDF_PATH}/examples/common_components/protocol_examples_common
   idf:
-    version: '>=5.3'
+    version: '>=5.5'
   espressif/esp_board_manager: '>=0.6.0'
+  # Bluetooth Audio (Classic A2DP Sink + AVRCP Target)
+  espressif/esp_bt_audio:
+    version: ^1.0
+  # GMF framework for BT audio pipeline (A2DP Sink stream → decoder → codec)
+  espressif/gmf_core:
+    version: ^1.0
+  espressif/gmf_io:
+    version: ^1.0
+  espressif/gmf_audio:
+    version: ^1.0

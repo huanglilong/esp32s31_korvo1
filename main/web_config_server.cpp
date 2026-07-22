@@ -53,6 +53,7 @@
 #include "app_config.h"
 #include "wifi_service.hpp"
 #include "drivers/audio/audio_driver.hpp"
+#include "drivers/bt_audio/bt_audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
 #include "drivers/system_monitor/system_monitor.hpp"
 #include "ulog_writer.h"
@@ -1046,6 +1047,23 @@ static esp_err_t _api_system_info(httpd_req_t *req) {
     bool sd_ok = SDCardDriver::instance().available();
     cJSON_AddBoolToObject(root, "sdcard_mounted", sd_ok);
 
+    /* Bluetooth audio */
+    bool bt_ok = BtAudioDriver::instance().available();
+    cJSON_AddBoolToObject(root, "bt_audio", bt_ok);
+    if (bt_ok) {
+        cJSON_AddBoolToObject(root, "bt_connected", BtAudioDriver::instance().connected());
+        cJSON_AddBoolToObject(root, "bt_streaming", BtAudioDriver::instance().streaming());
+        cJSON_AddStringToObject(root, "bt_device", BtAudioDriver::instance().device_name()[0]
+                                ? BtAudioDriver::instance().device_name() : "");
+        cJSON_AddStringToObject(root, "bt_device_addr", BtAudioDriver::instance().device_address()[0]
+                                ? BtAudioDriver::instance().device_address() : "");
+        cJSON_AddStringToObject(root, "bt_playback", BtAudioDriver::instance().playback_status_str());
+        cJSON_AddStringToObject(root, "bt_title", BtAudioDriver::instance().metadata_title()[0]
+                                ? BtAudioDriver::instance().metadata_title() : "");
+        cJSON_AddStringToObject(root, "bt_artist", BtAudioDriver::instance().metadata_artist()[0]
+                                ? BtAudioDriver::instance().metadata_artist() : "");
+    }
+
     /* Free heap */
     cJSON_AddNumberToObject(root, "free_heap", esp_get_free_heap_size() / 1024);
 
@@ -1284,6 +1302,27 @@ static esp_err_t _api_audio_volume_get(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
     cJSON_free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* GET /api/bt/status */
+static esp_err_t _api_bt_status(httpd_req_t *req) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "available", BtAudioDriver::instance().available());
+    if (BtAudioDriver::instance().available()) {
+        cJSON_AddBoolToObject(root, "connected", BtAudioDriver::instance().connected());
+        cJSON_AddBoolToObject(root, "streaming", BtAudioDriver::instance().streaming());
+        cJSON_AddStringToObject(root, "device_name", BtAudioDriver::instance().device_name());
+        cJSON_AddStringToObject(root, "device_addr", BtAudioDriver::instance().device_address());
+        cJSON_AddStringToObject(root, "playback_status", BtAudioDriver::instance().playback_status_str());
+        cJSON_AddStringToObject(root, "title", BtAudioDriver::instance().metadata_title());
+        cJSON_AddStringToObject(root, "artist", BtAudioDriver::instance().metadata_artist());
+    }
+    char *json = cJSON_Print(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -1977,7 +2016,11 @@ static void _register_handlers(httpd_handle_t server) {
     uri.uri = "/api/sdcard/info"; uri.method = HTTP_GET; uri.handler = _api_sdcard_info;
     httpd_register_uri_handler(server, &uri);
 
-    ESP_LOGI(TAG, "HTTP handlers registered (%d endpoints)", 25);
+    /* Bluetooth Audio APIs */
+    uri.uri = "/api/bt/status"; uri.method = HTTP_GET; uri.handler = _api_bt_status;
+    httpd_register_uri_handler(server, &uri);
+
+    ESP_LOGI(TAG, "HTTP handlers registered (%d endpoints)", 26);
 }
 
 /* ── mDNS ────────────────────────────────────────────────────────── */

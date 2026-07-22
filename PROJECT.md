@@ -52,6 +52,9 @@ esp32s31_korvo1/
 │   │   ├── audio/
 │   │   │   ├── audio_driver.hpp    # AudioDriver — ES8389 codec via esp_codec_dev (esp_board_manager API pattern)
 │   │   │   └── audio_driver.cpp
+│   │   ├── bt_audio/
+│   │   │   ├── bt_audio_driver.hpp # BtAudioDriver — BT A2DP Sink + AVRCP via GMF pipeline
+│   │   │   └── bt_audio_driver.cpp
 │   │   ├── sdcard/
 │   │   │   ├── sdcard_driver.hpp   # SDCardDriver — SDIO 3.0 4-bit 卡管理
 │   │   │   └── sdcard_driver.cpp

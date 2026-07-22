@@ -186,6 +186,32 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 0.5.3~1
+  espressif/esp_bt_audio:
+    component_hash: 8caa7b924a4dbed62e35417c1ce92b7b60fbd941c6341909e44787292b0b3ea6
+    dependencies:
+    - name: espressif/esp_audio_codec
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^2.5
+    - matches:
+      - if: $CONFIG{ESP_BT_AUDIO_GMF_IO_SUPPORT} == True
+      name: espressif/gmf_core
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^1.0
+    - matches:
+      - if: $CONFIG{ESP_BT_AUDIO_GMF_IO_SUPPORT} == True
+      name: espressif/gmf_io
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^1.0
+    - name: idf
+      require: private
+      version: '>=5.5'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.0~1
   espressif/esp_cam_sensor:
     component_hash: 0a2775d95fae99449bb4c044feab6d887e9db309602fad8df6c3fc58bc6e1b6d
     dependencies:
@@ -457,14 +483,14 @@ dependencies:
       require: private
       version: ^1.0
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.0.0
   espressif/gmf_core:
     component_hash: f242674fc224543cc8df3608730b039b3bc1fd7639741bfc4815d13df5a993fc
     dependencies: []
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.0.0
   espressif/gmf_fft:
@@ -486,7 +512,7 @@ dependencies:
       require: private
       version: ^1.0
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.0.0
   espressif/led_indicator:
@@ -595,12 +621,16 @@ direct_dependencies:
 - espressif/esp_audio_codec
 - espressif/esp_audio_simple_player
 - espressif/esp_board_manager
+- espressif/esp_bt_audio
 - espressif/esp_codec_dev
 - espressif/esp_lcd_touch_gt1151
 - espressif/esp_video
+- espressif/gmf_audio
+- espressif/gmf_core
+- espressif/gmf_io
 - espressif/mdns
 - idf
 - protocol_examples_common
-manifest_hash: fc6eaf3048fde0ac775c3eab9211edb4a1f5575869b8d6f5a8bc67e06babc0c4
+manifest_hash: ff71ff9329ccfd63e7b7925628b07189144d87ba19dc9c6e0d36017d5552a986
 target: esp32s31
 version: 3.0.0

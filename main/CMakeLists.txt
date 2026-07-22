@@ -92,6 +92,7 @@ idf_component_register(
          
          "web_config_server.cpp"
          "drivers/audio/audio_driver.cpp"
+         "drivers/bt_audio/bt_audio_driver.cpp"
          "drivers/sdcard/sdcard_driver.cpp"
          "drivers/camera/camera_driver.cpp"
          "drivers/camera/camera_app.cpp"
@@ -112,7 +113,7 @@ idf_component_register(
          "generated/system_stats.cpp"
          "generated/system_alert.cpp"
          "generated/uORBTopics.cpp"
-    INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/display" "drivers/system_monitor" "logger"
+    INCLUDE_DIRS "." "generated" "drivers/audio" "drivers/bt_audio" "drivers/sdcard" "drivers/camera" "drivers/buttons" "drivers/led" "drivers/display" "drivers/system_monitor" "logger"
     REQUIRES nvs_flash esp_wifi mdns cjson esp_http_server fatfs
              uorb ulog esp_audio_simple_player
              wifi_manager captive_dns esp_video

@@ -37,6 +37,7 @@
 #include "topics.h"
 
 #include "drivers/audio/audio_driver.hpp"
+#include "drivers/bt_audio/bt_audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
 #include "drivers/camera/camera_driver.hpp"
 #include "drivers/camera/camera_app.hpp"
@@ -366,7 +367,15 @@ extern "C" void app_main(void) {
         ESP_LOGW(TAG, "Audio driver not available");
     }
 
-    /* 5a. Initialize camera driver (config-driven) */
+    /* 5a. Initialize Bluetooth audio driver */
+    esp_err_t bt_ret = BtAudioDriver::instance().init();
+    if (bt_ret == ESP_OK) {
+        ESP_LOGI(TAG, "Bluetooth audio initialized (A2DP Sink + AVRCP)");
+    } else {
+        ESP_LOGW(TAG, "Bluetooth audio init failed: %s", esp_err_to_name(bt_ret));
+    }
+
+    /* 5b. Initialize camera driver (config-driven) */
     void *camera_handle = nullptr;
     int cam_ret = CameraDriver::instance().init(&s_camera_cfg, sizeof(s_camera_cfg), &camera_handle);
     if (cam_ret == 0) {
@@ -476,16 +485,21 @@ extern "C" void app_main(void) {
 
     ESP_LOGI(TAG, "Boot complete. Web config: http://esp-web-XXXXXX.local:8080");
     ESP_LOGI(TAG, "Free heap: %lu KB", esp_get_free_heap_size() / 1024);
+    if (bt_ret == ESP_OK) {
+        ESP_LOGI(TAG, "BT Audio: ready (A2DP Sink) — connect via Bluetooth settings");
+    }
 
     /* Main loop — print periodic status */
     while (true) {
         wifi_service_status_t wifi_st;
         WifiService::instance().get_status(&wifi_st);
 
-        ESP_LOGI(TAG, "[Status] WiFi: %s (%s), Volume: %d, SD: %s, Free heap: %lu KB",
+        ESP_LOGI(TAG, "[Status] WiFi: %s (%s), Volume: %d, BT: %s%s, SD: %s, Free heap: %lu KB",
                  wifi_st.sta_connected ? wifi_st.sta_ssid : "AP mode",
                  wifi_st.sta_connected ? wifi_st.sta_ip : "192.168.4.1",
                  AudioDriver::instance().volume(),
+                 bt_ret == ESP_OK ? (BtAudioDriver::instance().connected() ? "connected" : "ready") : "N/A",
+                 bt_ret == ESP_OK && BtAudioDriver::instance().streaming() ? " ▶" : "",
                  sd_ok ? "ok" : "none",
                  esp_get_free_heap_size() / 1024);
 

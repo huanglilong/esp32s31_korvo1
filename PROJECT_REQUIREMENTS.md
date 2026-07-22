@@ -25,7 +25,7 @@
 | A5 | **语音唤醒 (Wake Word)** | ESP-Skainet 本地语音唤醒引擎, 低功耗后台运行 | ⏳ 待开发 |
 | A6 | **语音命令识别** | ESP-Skainet 中文命令词识别, 本地离线处理 | ⏳ 待开发 |
 | A7 | **TTS 语音合成** | 文字转语音输出, 支持中文 | ⏳ 待开发 |
-| A8 | **Bluetooth Audio** | 蓝牙经典 A2DP Sink/Source, 蓝牙 LE Audio | ⏳ 待开发 |
+| A8 | **Bluetooth Audio** | 蓝牙经典 A2DP Sink (手机→音箱), AVRCP (遥控+元数据), GMF 管道解码 | ✅ 已完成 |
 
 ### 2.2 存储功能
 
@@ -65,7 +65,7 @@
 | # | 需求 | 说明 | 状态 |
 |---|------|------|:----:|
 | F1 | **Wi-Fi 连接** | Wi-Fi 6 Station 模式, Web 配网/NVS 持久化 | ✅ 已完成 |
-| F2 | **BLE 通信** | BLE MESH / BLE AUDIO，手机 APP 控制 | ⏳ 待开发 |
+| F2 | **Bluetooth 通信** | 蓝牙经典 A2DP Sink 音频接收, AVRCP 远程控制, 手机 APP 控制 | ✅ 已完成 (Classic BT) |
 | F3 | **Web 配置服务器** | HTTP 服务器, WiFi/音量/设备设置, 文件管理 | ✅ 已完成 |
 | F4 | **OTA 固件升级** | Wi-Fi OTA 远程升级, HTTP/HTTPS | ⏳ 待开发 |
 | F5 | **802.15.4 组网** | Thread/Zigbee/Matter 智能家居协议 | ⏳ 待开发 |
@@ -109,6 +109,7 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
+| 2026-07-22 | v0.12.0 | **Bluetooth Audio 集成**: 新增 BtAudioDriver (A2DP Sink + AVRCP Target), 使用 GMF 管道 (io_bt→aud_dec→aud_asrc→aud_ch_cvt→aud_bit_cvt→io_codec_dev) 将蓝牙音频流路由到 ES8389 编解码器。添加 `espressif/esp_bt_audio ^0.8` + GMF 依赖。添加 BT 配置到 sdkconfig.defaults (Bluedroid + A2DP + AVRCP)。集成到 main.cpp 启动序列。新增 `/api/bt/status` Web API 端点, 系统信息包含 BT 状态。 |
 | 2026-07-13 | v0.1 | 初始版本, 基于 ESP32-S31-Korvo-1 V1.1 硬件规划需求 |
 | 2026-07-13 | v0.2 | 创建项目脚手架 + uORB/ULog 组件 + Logger + WiFi Service + Web Config Server + Audio/SD/Camera/SystemMonitor 驱动 + main.cpp 启动序列。Build 通过 (ESP-IDF v6.1-beta1)。 |
 | 2026-07-13 | v0.3 | Code Review: 修复 esp_netif_init() 重复调用, 禁用 SPIRAM_XIP_FROM_PSRAM, 确认硬件兼容性 (ES8389/SDIO/WiFi/Camera) |

@@ -4,6 +4,12 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32s31_korvo1)
 
 # ─────────────────────────────────────────────────────────────────
+#  Suppress known GCC warnings from IDF BT Bluedroid stack
+#  (stringop-truncation with strncpy of BD_NAME_LEN bytes in GCC 12+)
+# ─────────────────────────────────────────────────────────────────
+idf_build_set_property(COMPILE_OPTIONS "-Wno-error=stringop-truncation" APPEND)
+
+# ─────────────────────────────────────────────────────────────────
 #  uORB topic code generation from proto/*.msg
 #  Automatically runs on idf.py build when .msg files change.
 #  Regenerate manually:  idf.py uorb_topics
