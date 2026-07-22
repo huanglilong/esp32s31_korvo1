@@ -27,7 +27,7 @@
 ## 开发环境
 - **芯片**: ESP32-S31 (RISC-V Dual-Core, 320 MHz)
 - **模组**: ESP32-S31-WROOM-3 (16MB Flash + 16MB PSRAM)
-- **ESP-IDF 版本**: v6.x
+- **ESP-IDF 版本**: v6.2.0
 - **Flash**: 16MB (SPI)
 - **PSRAM**: 16MB (Octal SPI, 封装内)
 
@@ -161,7 +161,7 @@ esp32s31_korvo1/
 
 | 框架 | 用途 |
 |------|------|
-| **ESP-IDF v6.x** | 基础开发框架 |
+| **ESP-IDF v6.2.0** | 基础开发框架 |
 | **esp32_s31_korvo_1 BSP** (v1.0.0~1) | [官方板级支持包](https://components.espressif.com/components/espressif/esp32_s31_korvo_1/versions/1.0.0~1), 提供 Display/LVGL/Touch/Buttons/Audio/SDCARD/LED/Camera 驱动 |
 | **ESP-Skainet** | AI 语音助手 SDK (语音唤醒 + 命令词识别) |
 | **ESP-Brookesia** | HMI 人机交互框架 (图形 UI, LVGL) |

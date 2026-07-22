@@ -1,6 +1,6 @@
 # Copilot Instructions — ESP32-S31 Project
 
-> **Framework**: ESP-IDF v6.x | **Language**: C++ (app) + C/C++ (components)
+> **Framework**: ESP-IDF v6.2.0 | **Language**: C++ (app) + C/C++ (components)
 > **Board**: ESP32-S31-Korvo-1 V1.1 | **Chip**: ESP32-S31 (RISC-V dual-core, up to 320 MHz)
 > **Docs**: [README.md](../README.md) (hardware) | [PROJECT.md](../PROJECT.md) (software) | [PROJECT_REQUIREMENTS.md](../PROJECT_REQUIREMENTS.md) (requirements) | [esp32s31_korvo1_hardware_info.md](doc/esp32s31_korvo1_hardware_info.md) (detailed HW)
 

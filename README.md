@@ -101,7 +101,7 @@
 
 ### ESP-IDF
 
-- Version: **v6.x**
+- Version: **v6.2.0**
 - Build, Flash and Monitor:
   - Linux:
     ```bash
@@ -159,4 +159,4 @@ $ idf.py build
 - **ULog**: PX4 ULog 格式二进制日志 (SD 卡 .ulg 文件, 含 git branch/commit/author/date/msg, SNTP 同步后自动启动)
 - **System Monitor**: CPU 使用率 (per-core idle deltas), 内存抽样, uORB system_stats/alert
 - **Thread Safety**: std::atomic<T> 跨核保护, FreeRTOS Mutex 互斥, CAS lazy-init
-- **Build**: ESP-IDF v6.x, CMake, uORB 代码生成 (proto/*.msg → generated/*)
+- **Build**: ESP-IDF v6.2.0, CMake, uORB 代码生成 (proto/*.msg → generated/*)
