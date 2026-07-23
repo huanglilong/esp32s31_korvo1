@@ -49,6 +49,13 @@ CONFIG_VFS_MAX_COUNT=16
 CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=80
 CONFIG_BSP_LCD_RGB_BUFFER_NUMS=2
 CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
+# Bounce buffer mode: required for PSRAM-based RGB LCD to avoid exhausting
+# internal DMA memory. Without it, the DMA link list for the full 768KB PSRAM
+# framebuffer needs ~188 descriptors in internal RAM, which fails when BT/WiFi
+# already consume most internal RAM. Bounce buffer uses small internal-RAM
+# buffers (800×5×2=8KB each, 16KB total for 2) needing only ~3 DMA descriptors.
+CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_MODE=y
+CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_HEIGHT=5
 # LED RGB backend (uses RMT for WS2812)
 CONFIG_BSP_LED_RGB_BACKEND_RMT=y
 # SPIFFS for internal storage
@@ -68,14 +75,14 @@ CONFIG_EXAMPLE_I2S_DIN_IO=6
 
 # WiFi - STA reconnect and retry are handled at application level in IDF v6.x
 
-# LWIP TCP
-CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
-CONFIG_LWIP_TCP_WND_DEFAULT=32768
-CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
-CONFIG_LWIP_MAX_SOCKETS=28
-CONFIG_LWIP_MAX_ACTIVE_TCP=40
-CONFIG_LWIP_MAX_LISTENING_TCP=24
+# LWIP TCP — reduced from defaults to save internal DRAM for LCD DMA
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
+CONFIG_LWIP_TCP_WND_DEFAULT=16384
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_LWIP_MAX_SOCKETS=16
+CONFIG_LWIP_MAX_ACTIVE_TCP=16
+CONFIG_LWIP_MAX_LISTENING_TCP=8
 
 # HTTP Server
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
@@ -121,6 +128,11 @@ CONFIG_LV_DRAW_SW_ASM_RISCV_V=y
 # Allocate WiFi/LWIP from PSRAM to save SRAM
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# Reserve more internal RAM for DMA-capable allocations (LCD bounce buffers,
+# GDMA link lists, etc.). Default 32KB is insufficient with BT + display active.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+# Move BSS segment to PSRAM — frees ~118KB of internal DRAM
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
 #
 # Bluetooth — Classic A2DP Sink + AVRCP Target (via Bluedroid)
@@ -137,6 +149,8 @@ CONFIG_BT_AVRCP_ENABLED=y
 CONFIG_BT_AVRCP_CT_COVER_ART_ENABLED=y
 # CONFIG_BT_BLE_ENABLED is not set
 CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=y
+# Allocate BT from PSRAM first — saves significant internal DRAM for DMA
+CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST=y
 # end of Bluetooth
 
 # ESP BT Audio — enable GMF IO support for A2DP Sink pipeline
