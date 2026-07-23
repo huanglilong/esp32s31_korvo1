@@ -243,6 +243,7 @@ void shared_mdns_release(void)
     s_mdns_refcount--;
     if (s_mdns_refcount <= 0) {
         mdns_free();
+        netbiosns_stop();
         s_mdns_initialized = false;
         s_mdns_refcount = 0;
         ESP_LOGI(TAG, "mDNS: fully deinitialized (last user released)");
