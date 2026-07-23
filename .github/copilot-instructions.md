@@ -149,7 +149,7 @@ See [esp32_debug_workflow.md](.github/esp32_debug_workflow.md) for full document
 4. If issues remain after 2 rounds, report to user
 5. Update all relevant `*.md` docs
 6. Flash to device and monitor logs to verify
-7. After all issues resolved, run **Build, Flash, Monitor & Test** to verify functionality
+7. After all issues resolved, run **4.2 Debug Workflow (no TTY)** to verify functionality
 
 ---
 
