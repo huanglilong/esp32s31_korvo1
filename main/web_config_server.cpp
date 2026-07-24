@@ -53,6 +53,7 @@
 #include "app_config.h"
 #include "wifi_service.hpp"
 #include "drivers/audio/audio_driver.hpp"
+#include "drivers/audio/audio_ulog_recorder.hpp"
 #include "drivers/bt_audio/bt_audio_driver.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
 #include "drivers/system_monitor/system_monitor.hpp"
@@ -113,6 +114,10 @@ static void audio_unlock(void)
 {
     if (s_audio_mutex) xSemaphoreGive(s_audio_mutex);
 }
+
+/* ── Audio state accessors (for AudioUlogRecorder mutual exclusion) ── */
+bool web_config_is_aac_recording(void) { return s_is_recording.load(std::memory_order_acquire); }
+bool web_config_is_playing(void) { return s_playing.load(std::memory_order_acquire); }
 
 static void _stop_audio_task_if_running(void)
 {
@@ -1359,6 +1364,7 @@ static esp_err_t _api_rec_start(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     audio_lock();
     if (s_is_recording) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":1}"); return ESP_OK; }
+    if (AudioUlogRecorder::instance().running()) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"ULog audio recording is active\"}"); return ESP_OK; }
     if (s_fm_busy) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"File manager busy\"}"); return ESP_OK; }
     if (!AudioDriver::instance().available()) { audio_unlock(); httpd_resp_sendstr(req, "{\"ok\":0,\"error\":\"Audio not available\"}"); return ESP_OK; }
     if (!s_audio_task.load(std::memory_order_acquire)) {
@@ -1885,6 +1891,13 @@ static esp_err_t _api_ulog_start(httpd_req_t *req) {
     }
     ulog_writer_t *ulog = ulog_writer_get();
     esp_err_t err = ulog_writer_start(ulog);
+    if (err == ESP_OK) {
+        /* Start continuous audio recording to ULog */
+        esp_err_t audio_err = AudioUlogRecorder::instance().start();
+        if (audio_err != ESP_OK) {
+            ESP_LOGW(TAG, "Audio ULog recorder start failed: %s", esp_err_to_name(audio_err));
+        }
+    }
     httpd_resp_set_type(req, "application/json");
     if (err == ESP_OK) {
         /* Return status so client can update UI immediately */
@@ -1913,6 +1926,8 @@ static esp_err_t _api_ulog_stop(httpd_req_t *req) {
     size_t final_bytes = ulog_writer_get_bytes_written(ulog);
     char filepath_snap[128] = {};
     if (fp) strlcpy(filepath_snap, fp, sizeof(filepath_snap));
+    /* Stop audio recording before stopping ULog */
+    AudioUlogRecorder::instance().stop();
     ulog_writer_stop(ulog);
     httpd_resp_set_type(req, "application/json");
     /* Return status so client can update UI immediately */
@@ -2102,6 +2117,10 @@ static void _web_config_task(void *arg)
                 ulog_autostart_done = true;
                 esp_err_t err = ulog_writer_start(ulog);
                 if (err == ESP_OK) {
+                    esp_err_t audio_err = AudioUlogRecorder::instance().start();
+                    if (audio_err != ESP_OK) {
+                        ESP_LOGW(TAG, "Audio ULog recorder start failed: %s", esp_err_to_name(audio_err));
+                    }
                     ESP_LOGI(TAG, "ULog auto-started after SNTP sync");
                 } else {
                     ESP_LOGW(TAG, "ULog auto-start failed: %s", esp_err_to_name(err));

@@ -51,7 +51,9 @@ esp32s31_korvo1/
 │   ├── drivers/
 │   │   ├── audio/
 │   │   │   ├── audio_driver.hpp    # AudioDriver — ES8389 codec via esp_codec_dev (esp_board_manager API pattern)
-│   │   │   └── audio_driver.cpp
+│   │   │   ├── audio_driver.cpp
+│   │   │   ├── audio_ulog_recorder.hpp # AudioUlogRecorder — 持续音频录制到 ULog (I2S→AAC→uORB)
+│   │   │   └── audio_ulog_recorder.cpp
 │   │   ├── bt_audio/
 │   │   │   ├── bt_audio_driver.hpp # BtAudioDriver — BT A2DP Sink + AVRCP via GMF pipeline
 │   │   │   └── bt_audio_driver.cpp
@@ -69,9 +71,9 @@ esp32s31_korvo1/
 │   ├── logger/
 │   │   ├── logger.hpp        # Text Logger — ESP_LOG → ring buffer → SD card (含 git info 文件头)
 │   │   └── logger.cpp
-│   ├── generated/            # ⚠️ 自动生成 — 由 tools/msg_gen.py 从 proto/*.msg 生成
-│   │   ├── wifi_state.h/cpp, volume_state.h/cpp, ...
-│   │   └── uORBTopics.hpp/cpp
+│   └── generated/            # ⚠️ 自动生成 — 由 tools/msg_gen.py 从 proto/*.msg 生成
+│       │   ├── wifi_state.h/cpp, volume_state.h/cpp, audio_frame.h/cpp, ...
+│       │   └── uORBTopics.hpp/cpp
 │   └── compat/               # 第三方兼容 shim
 ├── components/
 │   ├── uorb/                 # PX4 风格 pub/sub 消息总线 (FreeRTOS queue)
@@ -84,10 +86,11 @@ esp32s31_korvo1/
 │       └── ulog_writer.cpp
 │   └── gen_bmgr_codes/       # ⚠️ 自动生成 — 先 `pip3 install esp-bmgr-assist`，再运行 `idf.py bmgr -b esp32_s31_korvo_1`，不纳入 Git
 ├── proto/                    # uORB topic 定义 (.msg, PX4 兼容)
-│   ├── wifi_state.msg, volume_state.msg, ...
+│   ├── wifi_state.msg, volume_state.msg, audio_frame.msg, ...
 │   └── system_stats.msg, system_alert.msg
 ├── tools/
-│   └── msg_gen.py            # .msg → C++ 代码生成器
+│   ├── msg_gen.py            # .msg → C++ 代码生成器
+│   └── ulog_audio_extract.py # ULog → AAC 音频提取工具 (PC 端)
 ├── tests/                    # pytest 集成测试 (Web Config Server REST API)
 │   ├── conftest.py           # 共享 fixtures (base_url, client, api helper)
 │   ├── requirements.txt      # pytest + requests 依赖

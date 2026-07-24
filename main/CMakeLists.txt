@@ -92,6 +92,7 @@ idf_component_register(
          
          "web_config_server.cpp"
          "drivers/audio/audio_driver.cpp"
+         "drivers/audio/audio_ulog_recorder.cpp"
          "drivers/bt_audio/bt_audio_driver.cpp"
          "drivers/sdcard/sdcard_driver.cpp"
          "drivers/camera/camera_driver.cpp"
@@ -104,6 +105,7 @@ idf_component_register(
          "logger/logger.cpp"
          "generated/wifi_state.cpp"
          "generated/volume_state.cpp"
+         "generated/audio_frame.cpp"
          "generated/audio_level.cpp"
          "generated/camera_state.cpp"
          "generated/camera_frame.cpp"

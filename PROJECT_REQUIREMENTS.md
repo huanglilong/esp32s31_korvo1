@@ -26,6 +26,7 @@
 | A6 | **语音命令识别** | ESP-Skainet 中文命令词识别, 本地离线处理 | ⏳ 待开发 |
 | A7 | **TTS 语音合成** | 文字转语音输出, 支持中文 | ⏳ 待开发 |
 | A8 | **Bluetooth Audio** | 蓝牙经典 A2DP Sink (手机→音箱), AVRCP (遥控+元数据), GMF 管道解码 | ✅ 已完成 |
+| A9 | **Audio ULog 持续录制** | I2S Mic → AAC-ADTS 编码 → audio_frame uORB → ULog (.ulg), ULog 启动后自动持续录制, PC 端 ulog_audio_extract.py 提取 .aac | ✅ 已完成 |
 
 ### 2.2 存储功能
 
@@ -86,7 +87,7 @@
 | H2 | **系统监控** | CPU/内存使用率, FreeRTOS 任务监控, 资源告警 | ✅ 已完成 |
 | H3 | **电源管理** | Deep-sleep 语音唤醒, 低功耗模式切换 | ⏳ 待开发 |
 | H4 | **uORB 消息总线** | PX4 风格 pub/sub 进程间通信 (可选) | ✅ 已完成 |
-| H5 | **ULog 日志** | 二进制日志格式, SD 卡存储, Web API 启停控制 | ✅ 已完成 |
+| H5 | **ULog 日志** | 二进制日志格式, SD 卡存储, Web API 启停控制, 持续 Audio 录制 | ✅ 已完成 |
 
 ---
 
@@ -109,6 +110,7 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
+| 2026-07-24 | v0.12.0 | **Audio ULog 持续录制**: 新增 AudioUlogRecorder 模块, ULog 启动后自动持续录制音频 (I2S Mic → AAC-ADTS 编码 → audio_frame uORB → ULog .ulg 文件)。新增 `proto/audio_frame.msg` topic (1KB AAC-ADTS buffer, 实际帧 ~512B)。新增 `tools/ulog_audio_extract.py` PC 端工具, 从 .ulg 文件提取 AAC 音频输出 .aac 文件。与 .aac 录制/播放互斥 (共享 I2S)。AAC 参数: 16kHz/stereo/64kbps/ADTS。**uORB 修复**: `orb_subscribe()` 对大 topic (>256B) 使用 `xQueueCreateStatic` + PSRAM 分配 queue storage, 修复内部 SRAM 不足导致订阅失败。**性能优化**: audio_frame buffer 从 8KB 降至 1KB (实际 AAC 帧 ~512B), ULog 写入速率从 ~125KB/s 降至 ~16KB/s, 消除 Web 页面卡顿。 |
 | 2026-07-24 | v0.11.9 | **Code Review Round 3 — 3 fixes**: (1) Fix `shared_mdns_release()` missing `netbiosns_stop()` — NetBIOS name service socket (port 137/138) leaked on mDNS deinit. (2) Fix `BtAudioDriver` `_device_name` always empty — added discovery name cache (up to 4 devices, LRU eviction) that stores names from `ESP_BT_AUDIO_EVENT_DEVICE_DISCOVERED` and looks up by address on connect. (3) Fix `_api_audio_list()` Content-Type mismatch — returns HTML error page instead of JSON on SD card unavailable / OOM errors. Build 通过。 |
 | 2026-07-22 | v0.11.9 | **PSRAM 优化 + 4 个 bugfix**: (1) **LVGL draw buffer 迁移到 PSRAM**: 释放 ~40KB 内部 SRAM 给 WiFi/Bluetooth 协议栈, 降低 OOM 风险。`CONFIG_LVGL_DRAW_BUF_PSRAM=y`。 (2) **Fix 数据竞争 `s_playing_file`**: `_asp_evt` 回调中 `s_playing_file` 被多个任务 (A2DP 回调 + Web API handler) 并发读写, 添加 `std::atomic` 保护。 (3) **Fix 缺少 Content-Type**: `_api_files_list` 错误响应缺少 `Content-Type: application/json` header, 导致客户端解析失败。 (4) **重构: 移除冗余 `opendir('/sdcard')`**: `_api_files_list` 中 `file_list` 内部已包含 `/sdcard/` 前缀, 外层 `opendir` 重复。 |
 | 2026-07-22 | v0.12.0 | **Bluetooth Audio 集成**: 新增 BtAudioDriver (A2DP Sink + AVRCP Target), 使用 GMF 管道 (io_bt→aud_dec→aud_asrc→aud_ch_cvt→aud_bit_cvt→io_codec_dev) 将蓝牙音频流路由到 ES8389 编解码器。添加 `espressif/esp_bt_audio ^0.8` + GMF 依赖。添加 BT 配置到 sdkconfig.defaults (Bluedroid + A2DP + AVRCP)。集成到 main.cpp 启动序列。新增 `/api/bt/status` Web API 端点, 系统信息包含 BT 状态。 |

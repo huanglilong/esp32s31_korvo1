@@ -29,6 +29,8 @@ typedef struct {
     QueueHandle_t queue;      /**< FreeRTOS queue handle. */
     int           topic_idx;  /**< Index into s_topics[]; < 0 if inactive. */
     int           generation; /**< Monotonically increasing; prevents ABA in orb_publish(). */
+    uint8_t      *queue_storage;  /**< PSRAM-allocated queue storage (NULL for internal RAM queues). */
+    StaticQueue_t *queue_buf;     /**< PSRAM-allocated queue struct (NULL for internal RAM queues). */
 } orb_sub_entry_t;
 
 /** Topic registry entry. */
@@ -232,8 +234,44 @@ orb_sub_t orb_subscribe(orb_id_t meta)
         return -1;
     }
 
-    /* Create the per-subscriber queue */
-    QueueHandle_t q = xQueueCreate(meta->o_depth, meta->o_size);
+    /* Create the per-subscriber queue.
+     * For large topics (o_size > threshold), use PSRAM-backed static queue
+     * to avoid exhausting internal SRAM. FreeRTOS xQueueCreate allocates
+     * queue storage from the heap — on ESP32-S31 this is internal SRAM,
+     * which is scarce (~512KB shared with WiFi/LWIP/LVGL).
+     * xQueueCreateStatic lets us provide PSRAM-allocated storage instead. */
+#define UORB_PSRAM_QUEUE_THRESHOLD  256  /* Topics larger than this use PSRAM queues */
+
+    QueueHandle_t q = NULL;
+    uint8_t *queue_storage = NULL;
+    StaticQueue_t *queue_buf = NULL;
+
+    if (meta->o_size > UORB_PSRAM_QUEUE_THRESHOLD) {
+        /* Allocate queue storage and struct from PSRAM */
+        size_t storage_size = meta->o_depth * meta->o_size;
+        queue_storage = (uint8_t *)heap_caps_calloc(1, storage_size,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        queue_buf = (StaticQueue_t *)heap_caps_calloc(1, sizeof(StaticQueue_t),
+                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!queue_storage || !queue_buf) {
+            ESP_LOGE("uORB", "orb_subscribe: PSRAM alloc failed for %s queue (depth=%u, size=%u)",
+                     meta->o_name, meta->o_depth, (unsigned)meta->o_size);
+            if (queue_storage) heap_caps_free(queue_storage);
+            if (queue_buf) heap_caps_free(queue_buf);
+            /* Return the consumed slot to allow future subscribes */
+            if (from_free_list) {
+                s_sub_free_list[s_sub_free_count++] = s_idx;
+            } else {
+                s_num_subs--;
+            }
+            unlock();
+            return -1;
+        }
+        q = xQueueCreateStatic(meta->o_depth, meta->o_size, queue_storage, queue_buf);
+    } else {
+        q = xQueueCreate(meta->o_depth, meta->o_size);
+    }
+
     if (q == NULL) {
         /* Return the consumed slot to allow future subscribes */
         if (from_free_list) {
@@ -245,9 +283,11 @@ orb_sub_t orb_subscribe(orb_id_t meta)
         return -1;
     }
 
-    s_subs[s_idx].queue     = q;
-    s_subs[s_idx].topic_idx = t_idx;
-    s_subs[s_idx].generation = s_sub_generation++;  /* ABA protection */
+    s_subs[s_idx].queue         = q;
+    s_subs[s_idx].topic_idx     = t_idx;
+    s_subs[s_idx].generation    = s_sub_generation++;  /* ABA protection */
+    s_subs[s_idx].queue_storage = queue_storage;  /* NULL for internal RAM queues */
+    s_subs[s_idx].queue_buf     = queue_buf;      /* NULL for internal RAM queues */
 
     int pos = topic->num_subscribers++;
     topic->sub_indices[pos] = s_idx;
@@ -297,8 +337,17 @@ int orb_unsubscribe(orb_sub_t handle)
     if (sub->queue) {
         vQueueDelete(sub->queue);
     }
-    sub->queue     = NULL;
-    sub->topic_idx = -1;
+    /* Free PSRAM-allocated queue storage and struct (if any) */
+    if (sub->queue_storage) {
+        heap_caps_free(sub->queue_storage);
+    }
+    if (sub->queue_buf) {
+        heap_caps_free(sub->queue_buf);
+    }
+    sub->queue         = NULL;
+    sub->queue_storage = NULL;
+    sub->queue_buf     = NULL;
+    sub->topic_idx     = -1;
 
     /* Push slot to free-list for reuse by future orb_subscribe() */
     if (s_sub_free_count < ORB_MAX_SUBS) {

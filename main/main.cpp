@@ -316,6 +316,7 @@ static void _init_ulog() {
         ulog_writer_add_topic(writer, ORB_ID(wifi_state), 500);
         ulog_writer_add_topic(writer, ORB_ID(system_stats), 5000);
         ulog_writer_add_topic(writer, ORB_ID(volume_state), 1000);
+        ulog_writer_add_topic(writer, ORB_ID(audio_frame), 30);
 
         ESP_LOGI(TAG, "ULog writer initialized (will auto-start after SNTP sync)");
     } else {
