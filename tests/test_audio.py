@@ -16,7 +16,9 @@ PLAY_SECONDS = 5
 
 @pytest.fixture(autouse=True)
 def _ensure_clean_start(api):
-    """Before each test: stop any leftover playback/recording."""
+    """Before each test: stop any leftover playback/recording.
+    Also stop ULog if running, because AudioUlogRecorder (tied to ULog
+    lifecycle) blocks .aac recording via shared I2S mutual exclusion."""
     try:
         api.audio_stop()
     except Exception:
@@ -27,7 +29,23 @@ def _ensure_clean_start(api):
             api.record_stop()
     except Exception:
         pass
+    # Stop ULog if running — AudioUlogRecorder blocks .aac recording
+    ulog_was_running = False
+    try:
+        status = api.ulog_status()
+        ulog_was_running = status.get("running", False)
+        if ulog_was_running:
+            api.ulog_stop()
+            time.sleep(0.5)
+    except Exception:
+        pass
     yield
+    # Restart ULog if it was running before this test
+    if ulog_was_running:
+        try:
+            api.ulog_start()
+        except Exception:
+            pass
 
 
 class TestAudioVolume:
