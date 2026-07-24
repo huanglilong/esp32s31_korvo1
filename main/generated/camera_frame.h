@@ -10,7 +10,7 @@
 
 #define ORB_QUEUE_LENGTH_CAMERA_FRAME 2
 
-#define CAMERA_FRAME_FORMAT_STR "camera_frame:uint64_t timestamp;uint32_t frame_index;uint16_t width;uint16_t height;uint16_t jpeg_size;uint8_t format;uint8_t[15360] jpeg_data;uint8_t[5] _padding0;"
+#define CAMERA_FRAME_FORMAT_STR "camera_frame:uint64_t timestamp;uint32_t frame_index;uint16_t width;uint16_t height;uint16_t jpeg_size;uint8_t format;uint8_t[10240] jpeg_data;uint8_t[5] _padding0;"
 
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct camera_frame_s
@@ -21,7 +21,7 @@ typedef struct camera_frame_s
     uint16_t                 height;  ///< @brief
     uint16_t                 jpeg_size;  ///< @brief
     uint8_t                  format;  ///< @brief
-    uint8_t                  jpeg_data[15360];  ///< @brief
+    uint8_t                  jpeg_data[10240];  ///< @brief
 } camera_frame_s;
 
 #define CAMERA_FRAME_SIZE sizeof(camera_frame_s)

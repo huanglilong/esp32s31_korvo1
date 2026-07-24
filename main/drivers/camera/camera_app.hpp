@@ -37,7 +37,7 @@
 #define CAMERA_APP_TASK_CORE       0     /* Run on HP core (Core 0) */
 #define CAMERA_APP_TARGET_FPS      5     /* Target frame rate */
 #define CAMERA_APP_JPEG_QUALITY    30    /* JPEG quality for ULog recording (1-100) */
-#define CAMERA_APP_JPEG_OUT_BUF_SIZE (16 * 1024)  /* 16KB JPEG output buffer */
+#define CAMERA_APP_JPEG_OUT_BUF_SIZE (10 * 1024)  /* 10KB JPEG output buffer (320x240 q30 ≤10KB) */
 #define CAMERA_APP_ULOG_WIDTH      320   /* Downscaled width for ULog JPEG encoding */
 #define CAMERA_APP_ULOG_HEIGHT     240   /* Downscaled height for ULog JPEG encoding */
 
