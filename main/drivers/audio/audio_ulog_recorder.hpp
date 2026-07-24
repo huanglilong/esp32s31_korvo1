@@ -63,7 +63,7 @@ private:
     std::atomic<uint32_t>  _frame_count{0};
     std::atomic<uint32_t>  _bytes_published{0};
 
-    TaskHandle_t           _task_handle{nullptr};
+    std::atomic<TaskHandle_t> _task_handle{nullptr};
     StackType_t           *_task_stack{nullptr};
     StaticTask_t          *_task_tcb{nullptr};
 };

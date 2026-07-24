@@ -76,7 +76,7 @@ void AudioUlogRecorder::_task_func(void *arg)
     if (!pcm_buf) {
         ESP_LOGE(TAG, "Failed to allocate PCM buffer");
         self->_running.store(false, std::memory_order_release);
-        self->_task_handle = nullptr;
+        self->_task_handle.store(nullptr, std::memory_order_release);
         vTaskDelete(NULL);
         return;
     }
@@ -99,7 +99,7 @@ void AudioUlogRecorder::_task_func(void *arg)
         ESP_LOGE(TAG, "AAC encoder open failed");
         heap_caps_free(pcm_buf);
         self->_running.store(false, std::memory_order_release);
-        self->_task_handle = nullptr;
+        self->_task_handle.store(nullptr, std::memory_order_release);
         vTaskDelete(NULL);
         return;
     }
@@ -112,7 +112,7 @@ void AudioUlogRecorder::_task_func(void *arg)
         esp_audio_enc_close(encoder);
         heap_caps_free(pcm_buf);
         self->_running.store(false, std::memory_order_release);
-        self->_task_handle = nullptr;
+        self->_task_handle.store(nullptr, std::memory_order_release);
         vTaskDelete(NULL);
         return;
     }
@@ -130,7 +130,7 @@ void AudioUlogRecorder::_task_func(void *arg)
         esp_audio_enc_close(encoder);
         heap_caps_free(pcm_buf);
         self->_running.store(false, std::memory_order_release);
-        self->_task_handle = nullptr;
+        self->_task_handle.store(nullptr, std::memory_order_release);
         vTaskDelete(NULL);
         return;
     }
@@ -148,7 +148,7 @@ void AudioUlogRecorder::_task_func(void *arg)
         esp_audio_enc_close(encoder);
         heap_caps_free(pcm_buf);
         self->_running.store(false, std::memory_order_release);
-        self->_task_handle = nullptr;
+        self->_task_handle.store(nullptr, std::memory_order_release);
         vTaskDelete(NULL);
         return;
     }
@@ -252,7 +252,7 @@ void AudioUlogRecorder::_task_func(void *arg)
     heap_caps_free(enc_out_buf);
     heap_caps_free(pcm_buf);
 
-    self->_task_handle = nullptr;
+    self->_task_handle.store(nullptr, std::memory_order_release);
     vTaskDelete(NULL);
 }
 
@@ -323,7 +323,7 @@ esp_err_t AudioUlogRecorder::start()
         return ESP_FAIL;
     }
 
-    _task_handle = h;
+    _task_handle.store(h, std::memory_order_release);
     ESP_LOGI(TAG, "Audio ULog recorder started");
     return ESP_OK;
 }
@@ -338,14 +338,15 @@ void AudioUlogRecorder::stop()
     _running.store(false, std::memory_order_release);
 
     /* Wait for task to self-delete (it releases resources) */
-    for (int i = 0; i < 20 && _task_handle; ++i) {
+    for (int i = 0; i < 20 && _task_handle.load(std::memory_order_acquire); ++i) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    if (_task_handle) {
+    TaskHandle_t h = _task_handle.load(std::memory_order_acquire);
+    if (h) {
         ESP_LOGW(TAG, "Task did not exit in time, force deleting");
-        vTaskDelete(_task_handle);
-        _task_handle = nullptr;
+        vTaskDelete(h);
+        _task_handle.store(nullptr, std::memory_order_release);
     }
 
     /* Free stack (TCB is reused) */
