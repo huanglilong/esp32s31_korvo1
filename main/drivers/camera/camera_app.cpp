@@ -512,8 +512,9 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
     }
 
     /* JPEG encode: determine input format based on camera output.
-     * YUV422 path: PPA output is YUV422 YUYV → JPEG encoder takes YUV422 directly,
-     *   no RGB→YUV color space conversion needed (better compression, faster encoding).
+     * YUV path: PPA downscales YUV422 YUYV → YUV420 (chroma subsampled 4:2:2→4:2:0).
+     *   JPEG encoder takes YUV420 directly — no RGB→YUV conversion needed,
+     *   better compression and faster encoding than RGB565 path.
      * RGB565 path: PPA output is native RGB565 (byte order corrected by PPA).
      *   pixel_reverse=false because PPA already fixed the byte order.
      *   Only set pixel_reverse=true if PPA was NOT used AND input is RGB565X. */
@@ -594,7 +595,7 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
 
     memset(frame, 0, sizeof(*frame));
     frame->timestamp   = (uint64_t)esp_timer_get_time();
-    frame->frame_index = _frame_count.load(std::memory_order_relaxed);
+    frame->frame_index = _ulog_frame_count.load(std::memory_order_relaxed);
     frame->width       = (uint16_t)encode_width;
     frame->height      = (uint16_t)encode_height;
     frame->format      = 0;  /* 0 = JPEG */
