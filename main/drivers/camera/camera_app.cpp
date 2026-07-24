@@ -5,14 +5,14 @@
  * JPEG-encodes them using HW JPEG codec, and publishes camera_frame
  * uORB topics for ULog writer to record to .ulg files on SD card.
  *
- * PPA pipeline: 640x480 RGB565X → byte-swap + 180° rotate + downscale → 320x240 RGB565
- * JPEG pipeline: 320x240 RGB565 → HW JPEG (quality 30) → ~5-12KB per frame
+ * PPA pipeline: 640x480 YUV422 YUYV → 180° rotate + downscale → 320x240 YUV422
+ * JPEG pipeline: 320x240 YUV422 → HW JPEG (quality 45, YUV422 subsampling) → ~4-10KB per frame
  *
  * ESP32-S31 hardware notes:
  *   - PPA (Pixel Processing Accelerator) for HW scaling + rotation + byte-swap
  *   - HW JPEG codec for efficient JPEG encoding
  *   - OV3660 mounted upside-down → BSP_CAMERA_ROTATION=180
- *   - OV3660 outputs RGB565X (byte-swapped) → PPA byte_swap=1 corrects to RGB565
+ *   - OV3660 outputs YUV422 YUYV (no byte-swap needed, unlike RGB565X)
  *   - Camera I2C (SCCB) shares GPIO0/1 with ES8389
  */
 
@@ -126,13 +126,21 @@ int CameraApp::init() {
     ESP_LOGI(TAG, "Video device opened: %s (%s)",
              BSP_CAMERA_DEVICE,
              app_video_get_pixelformat() == V4L2_PIX_FMT_RGB565 ? "RGB565" :
-             app_video_get_pixelformat() == V4L2_PIX_FMT_RGB565X ? "RGB565X" : "unknown");
+             app_video_get_pixelformat() == V4L2_PIX_FMT_RGB565X ? "RGB565X" :
+             app_video_get_pixelformat() == V4L2_PIX_FMT_YUYV ? "YUV422-YUYV" :
+             app_video_get_pixelformat() == V4L2_PIX_FMT_YUV422P ? "YUV422P" :
+             app_video_get_pixelformat() == V4L2_PIX_FMT_YUV420 ? "YUV420" : "unknown");
 
-    /* Detect RGB565X (byte-swapped) output from camera.
-     * OV3660 typically outputs RGB565X — PPA byte_swap=1 corrects this. */
+    /* Detect camera output format.
+     * YUV422 YUYV: no byte-swap needed (unlike RGB565X).
+     * RGB565X: PPA byte_swap=1 corrects byte order. */
     _rgb565x_input = (app_video_get_pixelformat() == V4L2_PIX_FMT_RGB565X);
     if (_rgb565x_input) {
         ESP_LOGI(TAG, "Camera outputs RGB565X (byte-swapped) — PPA byte_swap will correct");
+    } else if (app_video_get_pixelformat() == V4L2_PIX_FMT_YUYV ||
+               app_video_get_pixelformat() == V4L2_PIX_FMT_YUV422P ||
+               app_video_get_pixelformat() == V4L2_PIX_FMT_YUV420) {
+        ESP_LOGI(TAG, "Camera outputs YUV format — no byte_swap needed");
     }
 
     /* Step 3: Query frame dimensions from V4L2 */
@@ -368,12 +376,13 @@ void CameraApp::_stream_task(void * /*arg*/) {
  *  Publish camera_frame uORB topic for ULog recording
  *
  *  PPA pipeline (single SRM operation):
- *    Input:  640x480 RGB565X (byte-swapped from OV3660)
- *    PPA:    byte_swap=1 (RGB565X→RGB565) + rotate 180° + downscale to 320x240
- *    Output: 320x240 native RGB565 → HW JPEG encode
+ *    Input:  640x480 YUV422 YUYV (from OV3660)
+ *    PPA:    rotate 180° + downscale to 320x240 → YUV422
+ *    Output: 320x240 YUV422 → HW JPEG encode
  *
  *  180° rotation: OV3660 is mounted upside-down on Korvo-1 board.
  *  BSP_CAMERA_ROTATION=180 confirms this.
+ * YUV422 has no byte-swap issue (unlike RGB565X), so byte_swap=0.
  * ════════════════════════════════════════════════════════════════════ */
 void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint32_t height)
 {
@@ -391,11 +400,16 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
         return;
     }
 
-    /* PPA: downscale + rotate 180° + byte-swap RGB565X→RGB565 in one SRM operation.
-     * This is the primary path — PPA handles all pixel transformations efficiently.
-     * Without PPA, we fall back to direct JPEG encode (may have wrong colors/rotation). */
+    /* PPA: downscale + rotate 180° in one SRM operation.
+     * YUV422 path: no byte_swap needed (YUYV is byte-ordered, not byte-swapped like RGB565X).
+     * RGB565X fallback: byte_swap=1 corrects byte order within each 16-bit pixel.
+     * Without PPA, we fall back to direct JPEG encode (may have wrong rotation). */
     if (_ppa_client && _ulog_resize_buf) {
 #if SOC_PPA_SUPPORTED
+        bool is_yuv_input = (app_video_get_pixelformat() == V4L2_PIX_FMT_YUYV ||
+                             app_video_get_pixelformat() == V4L2_PIX_FMT_YUV422P ||
+                             app_video_get_pixelformat() == V4L2_PIX_FMT_YUV420);
+
         ppa_srm_oper_config_t srm_cfg = {};
         srm_cfg.in.buffer = rgb565_data;
         srm_cfg.in.pic_w = width;
@@ -404,7 +418,6 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
         srm_cfg.in.block_h = height;
         srm_cfg.in.block_offset_x = 0;
         srm_cfg.in.block_offset_y = 0;
-        srm_cfg.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
         srm_cfg.out.buffer = _ulog_resize_buf;
         srm_cfg.out.buffer_size = CAMERA_APP_ULOG_WIDTH * CAMERA_APP_ULOG_HEIGHT * 2;
@@ -412,7 +425,20 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
         srm_cfg.out.pic_h = CAMERA_APP_ULOG_HEIGHT;
         srm_cfg.out.block_offset_x = 0;
         srm_cfg.out.block_offset_y = 0;
-        srm_cfg.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+
+        if (is_yuv_input) {
+            /* YUV422 YUYV input → PPA rotate + downscale → YUV422 output */
+            srm_cfg.in.srm_cm = PPA_SRM_COLOR_MODE_YUV422_YUYV;
+            srm_cfg.out.srm_cm = PPA_SRM_COLOR_MODE_YUV422_YUYV;
+            srm_cfg.in.yuv_range = PPA_COLOR_RANGE_LIMIT;
+            srm_cfg.in.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
+            srm_cfg.out.yuv_range = PPA_COLOR_RANGE_LIMIT;
+            srm_cfg.out.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
+        } else {
+            /* RGB565X input → PPA byte-swap + rotate + downscale → RGB565 output */
+            srm_cfg.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+            srm_cfg.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+        }
 
         /* 180° rotation: OV3660 is mounted upside-down (BSP_CAMERA_ROTATION=180) */
         srm_cfg.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
@@ -423,10 +449,8 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
         srm_cfg.scale_x = scale_x;
         srm_cfg.scale_y = scale_y;
 
-        /* byte_swap=1: correct RGB565X (byte-swapped) to native RGB565.
-         * rgb_swap=0: do NOT swap R↔B channels (that would cause red/blue inversion).
-         * OV3660 outputs bytes in swapped order (high/low byte reversed),
-         * byte_swap fixes the byte order within each 16-bit pixel. */
+        /* byte_swap: only needed for RGB565X input (corrects byte order within 16-bit pixel).
+         * YUV422 YUYV has no byte-swap issue — byte_swap is only available for ARGB8888/RGB565. */
         srm_cfg.rgb_swap = 0;
         srm_cfg.byte_swap = _rgb565x_input ? 1 : 0;
 
@@ -443,25 +467,38 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
 #endif
     }
 
-    /* JPEG encode: PPA output is native RGB565 (byte order corrected).
-     * pixel_reverse=false because PPA already fixed the byte order.
-     * Only set pixel_reverse=true if PPA was NOT used AND input is RGB565X. */
-    jpeg_encode_cfg_t enc_cfg = {
-        .height = encode_height,
-        .width = encode_width,
-        .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
-        .sub_sample = JPEG_DOWN_SAMPLING_YUV420,
-        .image_quality = CAMERA_APP_JPEG_QUALITY,
-        .pixel_reverse = false,
-    };
+    /* JPEG encode: determine input format based on camera output.
+     * YUV422 path: PPA output is YUV422 YUYV → JPEG encoder takes YUV422 directly,
+     *   no RGB→YUV color space conversion needed (better compression, faster encoding).
+     * RGB565 path: PPA output is native RGB565 (byte order corrected by PPA).
+     *   pixel_reverse=false because PPA already fixed the byte order.
+     *   Only set pixel_reverse=true if PPA was NOT used AND input is RGB565X. */
+    bool is_yuv_input = (app_video_get_pixelformat() == V4L2_PIX_FMT_YUYV ||
+                         app_video_get_pixelformat() == V4L2_PIX_FMT_YUV422P ||
+                         app_video_get_pixelformat() == V4L2_PIX_FMT_YUV420);
+
+    jpeg_encode_cfg_t enc_cfg = {};
+    enc_cfg.height = encode_height;
+    enc_cfg.width = encode_width;
+    if (is_yuv_input) {
+        enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_YUV422;
+        enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
+    } else {
+        enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
+        enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV420;
+    }
+    enc_cfg.image_quality = CAMERA_APP_JPEG_QUALITY;
+    enc_cfg.pixel_reverse = false;
 
     /* Fallback: if PPA was not used and camera outputs RGB565X,
      * pixel_reverse tells JPEG encoder to swap bytes internally. */
-    if (encode_input == rgb565_data && _rgb565x_input) {
+    if (!is_yuv_input && encode_input == rgb565_data && _rgb565x_input) {
         enc_cfg.pixel_reverse = true;
     }
 
-    uint32_t inbuf_size = encode_width * encode_height * 2;
+    uint32_t inbuf_size = is_yuv_input
+        ? (encode_width * encode_height * 2)   /* YUV422: 2 bytes/pixel */
+        : (encode_width * encode_height * 2);  /* RGB565: 2 bytes/pixel */
     esp_err_t ret = jpeg_encoder_process(_jpeg_encoder, &enc_cfg,
                                           encode_input, inbuf_size,
                                           _jpeg_out_buf, _jpeg_out_buf_size,
@@ -598,9 +635,12 @@ bool CameraApp::_init_jpeg_encoder(void)
     }
 #endif
 
-    ESP_LOGI(TAG, "HW JPEG encoder + PPA initialized (output buf: %u bytes, ULog: %dx%d, rotate: 180°, byte_swap: %d)",
+    ESP_LOGI(TAG, "HW JPEG encoder + PPA initialized (output buf: %u bytes, ULog: %dx%d, rotate: 180°, byte_swap: %d, yuv_input: %d)",
              (unsigned)_jpeg_out_buf_size, CAMERA_APP_ULOG_WIDTH, CAMERA_APP_ULOG_HEIGHT,
-             _rgb565x_input ? 1 : 0);
+             _rgb565x_input ? 1 : 0,
+             (app_video_get_pixelformat() == V4L2_PIX_FMT_YUYV ||
+              app_video_get_pixelformat() == V4L2_PIX_FMT_YUV422P ||
+              app_video_get_pixelformat() == V4L2_PIX_FMT_YUV420) ? 1 : 0);
     return true;
 }
 

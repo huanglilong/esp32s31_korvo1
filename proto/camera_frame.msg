@@ -1,10 +1,10 @@
 # Camera JPEG frame for ULog recording
 # Records JPEG-encoded camera frames to .ulg files on SD card.
 #
-# ESP32-S31 DVP path: OV3660 640x480 RGB565X → PPA (byte-swap + rotate 180°
-# + downscale) → 320x240 RGB565 → HW JPEG encode (quality 30)
-# → typically 3-8KB per frame. Buffer sized 10240 (10KB) to cover
-# worst-case frames at 320x240 quality 30.
+# ESP32-S31 DVP path: OV3660 640x480 YUV422 YUYV → PPA (rotate 180°
+# + downscale) → 320x240 YUV422 → HW JPEG encode (quality 45, YUV422 subsampling)
+# → typically 4-10KB per frame. Buffer sized 10240 (10KB) to cover
+# worst-case frames at 320x240 quality 45.
 #
 # Variable-length JPEG: jpeg_size indicates actual data length, jpeg_data[] is
 # a fixed-size buffer that may be partially filled. ULog writer uses
