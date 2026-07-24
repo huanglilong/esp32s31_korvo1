@@ -3,7 +3,7 @@
 /*
  * CameraApp — Continuous camera ULog frame recording.
  *
- * Captures DVP camera frames (OV3660) via V4L2 (/dev/video2),
+ * Captures DVP camera frames (OV3660) via V4L2 (/dev/video0),
  * JPEG-encodes them using HW JPEG codec, and publishes camera_frame
  * uORB topics for ULog writer to record to .ulg files on SD card.
  *
