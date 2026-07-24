@@ -109,6 +109,7 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
+| 2026-07-24 | v0.11.9 | **Code Review Round 3 — 3 fixes**: (1) Fix `shared_mdns_release()` missing `netbiosns_stop()` — NetBIOS name service socket (port 137/138) leaked on mDNS deinit. (2) Fix `BtAudioDriver` `_device_name` always empty — added discovery name cache (up to 4 devices, LRU eviction) that stores names from `ESP_BT_AUDIO_EVENT_DEVICE_DISCOVERED` and looks up by address on connect. (3) Fix `_api_audio_list()` Content-Type mismatch — returns HTML error page instead of JSON on SD card unavailable / OOM errors. Build 通过。 |
 | 2026-07-22 | v0.11.9 | **PSRAM 优化 + 4 个 bugfix**: (1) **LVGL draw buffer 迁移到 PSRAM**: 释放 ~40KB 内部 SRAM 给 WiFi/Bluetooth 协议栈, 降低 OOM 风险。`CONFIG_LVGL_DRAW_BUF_PSRAM=y`。 (2) **Fix 数据竞争 `s_playing_file`**: `_asp_evt` 回调中 `s_playing_file` 被多个任务 (A2DP 回调 + Web API handler) 并发读写, 添加 `std::atomic` 保护。 (3) **Fix 缺少 Content-Type**: `_api_files_list` 错误响应缺少 `Content-Type: application/json` header, 导致客户端解析失败。 (4) **重构: 移除冗余 `opendir('/sdcard')`**: `_api_files_list` 中 `file_list` 内部已包含 `/sdcard/` 前缀, 外层 `opendir` 重复。 |
 | 2026-07-22 | v0.12.0 | **Bluetooth Audio 集成**: 新增 BtAudioDriver (A2DP Sink + AVRCP Target), 使用 GMF 管道 (io_bt→aud_dec→aud_asrc→aud_ch_cvt→aud_bit_cvt→io_codec_dev) 将蓝牙音频流路由到 ES8389 编解码器。添加 `espressif/esp_bt_audio ^0.8` + GMF 依赖。添加 BT 配置到 sdkconfig.defaults (Bluedroid + A2DP + AVRCP)。集成到 main.cpp 启动序列。新增 `/api/bt/status` Web API 端点, 系统信息包含 BT 状态。 |
 | 2026-07-13 | v0.1 | 初始版本, 基于 ESP32-S31-Korvo-1 V1.1 硬件规划需求 |
