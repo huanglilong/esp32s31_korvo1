@@ -70,4 +70,15 @@ private:
     void *_pool;       /* esp_gmf_pool_handle_t */
     void *_sink_pipe;  /* esp_gmf_pipeline_handle_t */
     void *_sink_task;  /* esp_gmf_task_handle_t */
+
+    /* Cached device name from the last discovery event.
+     * When a device connects, we look up its name by address from this cache.
+     * Limitation: if the phone connects without prior discovery (e.g., auto-reconnect
+     * from phone side), the name will show as "Unknown" until next discovery cycle. */
+    static constexpr int MAX_CACHED_NAMES = 4;
+    struct _cached_name_t { uint8_t addr[6]; char name[64]; };
+    _cached_name_t _name_cache[MAX_CACHED_NAMES];
+    int _name_cache_count{0};
+    void _cache_name(const uint8_t addr[6], const char *name);
+    void _lookup_name(const uint8_t addr[6]);  /* copies cached name → _device_name */
 };

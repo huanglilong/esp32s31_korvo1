@@ -61,6 +61,8 @@ BtAudioDriver::BtAudioDriver()
     _device_name[0] = '\0';
     _meta_title[0] = '\0';
     _meta_artist[0] = '\0';
+    memset(_name_cache, 0, sizeof(_name_cache));
+    _name_cache_count = 0;
 }
 
 BtAudioDriver::~BtAudioDriver() { deinit(); }
@@ -77,6 +79,43 @@ const char* BtAudioDriver::playback_status_str() const
         case ESP_BT_AUDIO_PLAYBACK_STATUS_ERROR:    return "ERROR";
         default: return "UNKNOWN";
     }
+}
+
+/* -- Name cache ------------------------------------------- */
+void BtAudioDriver::_cache_name(const uint8_t addr[6], const char *name)
+{
+    if (!name || name[0] == '\0') return;
+
+    /* Update existing entry if address already cached */
+    for (int i = 0; i < _name_cache_count; i++) {
+        if (memcmp(_name_cache[i].addr, addr, 6) == 0) {
+            strlcpy(_name_cache[i].name, name, sizeof(_name_cache[i].name));
+            return;
+        }
+    }
+
+    /* Add new entry, evict oldest if full */
+    int idx = (_name_cache_count < MAX_CACHED_NAMES) ? _name_cache_count++ : 0;
+    if (_name_cache_count > MAX_CACHED_NAMES) {
+        /* Shift entries left, dropping the oldest (index 0) */
+        for (int i = 1; i < MAX_CACHED_NAMES; i++) {
+            _name_cache[i - 1] = _name_cache[i];
+        }
+        idx = MAX_CACHED_NAMES - 1;
+    }
+    memcpy(_name_cache[idx].addr, addr, 6);
+    strlcpy(_name_cache[idx].name, name, sizeof(_name_cache[idx].name));
+}
+
+void BtAudioDriver::_lookup_name(const uint8_t addr[6])
+{
+    for (int i = 0; i < _name_cache_count; i++) {
+        if (memcmp(_name_cache[i].addr, addr, 6) == 0) {
+            strlcpy(_device_name, _name_cache[i].name, sizeof(_device_name));
+            return;
+        }
+    }
+    /* Not found — leave _device_name as-is (could be "" or previous name) */
 }
 
 /* -- GMF pool registration helpers ------------------------ */
@@ -307,7 +346,13 @@ void BtAudioDriver::_handle_event(esp_bt_audio_event_t event, void *event_data)
                      "%02x:%02x:%02x:%02x:%02x:%02x",
                      st->addr[0], st->addr[1], st->addr[2],
                      st->addr[3], st->addr[4], st->addr[5]);
-            ESP_LOGI(TAG, "Connected: %s", _device_addr);
+            /* Look up device name from discovery cache */
+            _device_name[0] = '\0';
+            _lookup_name(st->addr);
+            if (_device_name[0] == '\0') {
+                strlcpy(_device_name, "Unknown", sizeof(_device_name));
+            }
+            ESP_LOGI(TAG, "Connected: %s (%s)", _device_name, _device_addr);
             esp_bt_audio_classic_set_scan_mode(false, false);
         } else {
             _connected.store(false, std::memory_order_release);
@@ -375,6 +420,8 @@ void BtAudioDriver::_handle_event(esp_bt_audio_event_t event, void *event_data)
                  "%02x:%02x:%02x:%02x:%02x:%02x",
                  dev->addr[0], dev->addr[1], dev->addr[2],
                  dev->addr[3], dev->addr[4], dev->addr[5]);
+        /* Cache the name so we can show it when the device connects */
+        _cache_name(dev->addr, dev->name);
         ESP_LOGI(TAG, "Discovered: %s (%s)", dev->name, addr_str);
         break;
     }
