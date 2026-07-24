@@ -63,7 +63,7 @@ esp32s31_korvo1/
 │   │   ├── camera/
 │   │   │   ├── camera_driver.hpp   # CameraDriver — OV3660 DVP 摄像头
 │   │   │   ├── camera_driver.cpp
-│   │   │   ├── camera_app.hpp      # CameraApp — 摄像头 LCD 预览 (V4L2 + LVGL canvas)
+│   │   │   ├── camera_app.hpp      # CameraApp — 摄像头 LCD 预览 + JPEG ULog 录制 (V4L2 + HW JPEG → camera_frame uORB)
 │   │   │   └── camera_app.cpp
 │   │   └── system_monitor/
 │   │       ├── system_monitor.hpp  # SystemMonitor — CPU/内存采样 + uORB
@@ -90,7 +90,8 @@ esp32s31_korvo1/
 │   └── system_stats.msg, system_alert.msg
 ├── tools/
 │   ├── msg_gen.py            # .msg → C++ 代码生成器
-│   └── ulog_audio_extract.py # ULog → AAC 音频提取工具 (PC 端)
+│   ├── ulog_audio_extract.py # ULog → AAC 音频提取工具 (PC 端)
+│   └── ulog_to_video.py      # ULog → Camera+Audio 合成视频工具 (PC 端, FFmpeg)
 ├── tests/                    # pytest 集成测试 (Web Config Server REST API)
 │   ├── conftest.py           # 共享 fixtures (base_url, client, api helper)
 │   ├── requirements.txt      # pytest + requests 依赖

@@ -1,16 +1,19 @@
 /*
- * CameraApp — Camera streaming to LCD display.
+ * CameraApp — Camera streaming to LCD display + ULog frame recording.
  *
  * Captures DVP camera frames (OV3660) via V4L2 (/dev/video0) and
  * displays them on the LCD using an LVGL canvas.  Uses the example's
  * app_video helper for V4L2 device management.
+ *
+ * When recording is enabled, also JPEG-encodes frames and publishes
+ * camera_frame uORB topics for ULog writer to record to .ulg files.
  *
  * ESP32-S31 hardware notes:
  *   - PPA (Pixel Processing Accelerator) is available for HW scaling + fill
  *   - No MIPI CSI, uses DVP 8-bit parallel
  *   - Camera sensor: OV3660, DVP 8-bit parallel, 20 MHz XCLK
  *   - Camera I2C (SCCB) shares GPIO0/1 with ES8389
- *   - HW JPEG codec available for snapshot encoding
+ *   - HW JPEG codec available for efficient JPEG encoding
  */
 
 #include "camera_app.hpp"
@@ -24,6 +27,7 @@
 #if SOC_PPA_SUPPORTED
 #include "driver/ppa.h"
 #endif
+#include "driver/jpeg_encode.h"
 #include <cstring>
 #include <cinttypes>
 #include <new>
@@ -82,6 +86,7 @@ CameraApp::CameraApp() :
     _mutex = xSemaphoreCreateMutex();
     _canvas_bufs[0] = nullptr;
     _canvas_bufs[1] = nullptr;
+    _jpeg_mutex = xSemaphoreCreateMutex();
 }
 
 CameraApp::~CameraApp() {
@@ -89,6 +94,10 @@ CameraApp::~CameraApp() {
     if (_mutex) {
         vSemaphoreDelete(_mutex);
         _mutex = nullptr;
+    }
+    if (_jpeg_mutex) {
+        vSemaphoreDelete(_jpeg_mutex);
+        _jpeg_mutex = nullptr;
     }
 }
 
@@ -249,6 +258,13 @@ int CameraApp::init() {
                  _ppa_client ? "(PPA HW scaled)" : "(CPU centering)");
     }
 
+    /* Step 6: Initialize HW JPEG encoder for ULog frame recording */
+    ESP_LOGI(TAG, "Step 6: Initializing HW JPEG encoder...");
+    if (!_init_jpeg_encoder()) {
+        ESP_LOGW(TAG, "HW JPEG encoder init failed — camera ULog recording disabled");
+        /* Non-fatal: LCD preview still works, just no ULog recording */
+    }
+
     /* Step 7: Set up V4L2 buffers and register frame callback */
     ret = app_video_set_bufs(_video_fd, CAMERA_APP_NUM_V4L2_BUFS, nullptr);
     if (ret != ESP_OK) {
@@ -402,6 +418,9 @@ void CameraApp::deinit() {
             _canvas_bufs[i] = nullptr;
         }
     }
+
+    /* Deinitialize HW JPEG encoder */
+    _deinit_jpeg_encoder();
 
     _initialized.store(false, std::memory_order_relaxed);
 
@@ -573,7 +592,7 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t camera_buf_index,
             fs.timestamp = now;
             fs.frame_count = count;
             fs.fps = fps;
-            fs.fps_total_bytes = 0; /* No JPEG encoding in this path */
+            fs.fps_total_bytes = 0; /* Not tracked per-frame in LCD preview path */
             orb_publish(ORB_ID(fps_stats), pub_fps, &fs);
         }
 
@@ -586,6 +605,9 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t camera_buf_index,
                      fps, count, (uint32_t)(esp_get_free_heap_size() / 1024));
         }
     }
+
+    /* Publish camera_frame for ULog recording */
+    self._publish_camera_frame(camera_buf, camera_buf_hes, camera_buf_ves);
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -594,4 +616,256 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t camera_buf_index,
 void CameraApp::_stream_task(void * /*arg*/) {
     /* Not used — app_video creates its own streaming task internally.
      * We use app_video_stream_task_start/stop for lifecycle management. */
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ *  Publish camera_frame uORB topic for ULog recording
+ * ════════════════════════════════════════════════════════════════════ */
+void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint32_t height)
+{
+    if (!rgb565_data || width == 0 || height == 0) return;
+
+    /* JPEG-encode the RGB565 frame using HW encoder.
+     * For ULog recording, we downscale to 320x240 first via PPA
+     * to keep JPEG size < 15KB (640x480 produces >32KB even at quality 10). */
+    uint32_t jpeg_size = 0;
+    uint8_t *encode_input = rgb565_data;
+    uint32_t encode_width = width;
+    uint32_t encode_height = height;
+
+    if (_jpeg_mutex) xSemaphoreTake(_jpeg_mutex, portMAX_DELAY);
+
+    if (!_jpeg_encoder || !_jpeg_out_buf) {
+        if (_jpeg_mutex) xSemaphoreGive(_jpeg_mutex);
+        return;
+    }
+
+    /* Downscale via PPA if available, otherwise use original (may fail for large frames) */
+    if (_ulog_ppa_client && _ulog_resize_buf && (width > CAMERA_APP_ULOG_WIDTH || height > CAMERA_APP_ULOG_HEIGHT)) {
+#if SOC_PPA_SUPPORTED
+        ppa_srm_oper_config_t srm_cfg = {};
+        srm_cfg.in.buffer = rgb565_data;
+        srm_cfg.in.pic_w = width;
+        srm_cfg.in.pic_h = height;
+        srm_cfg.in.block_w = width;
+        srm_cfg.in.block_h = height;
+        srm_cfg.in.block_offset_x = 0;
+        srm_cfg.in.block_offset_y = 0;
+        srm_cfg.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+        srm_cfg.out.buffer = _ulog_resize_buf;
+        srm_cfg.out.buffer_size = CAMERA_APP_ULOG_WIDTH * CAMERA_APP_ULOG_HEIGHT * 2;
+        srm_cfg.out.pic_w = CAMERA_APP_ULOG_WIDTH;
+        srm_cfg.out.pic_h = CAMERA_APP_ULOG_HEIGHT;
+        srm_cfg.out.block_offset_x = 0;
+        srm_cfg.out.block_offset_y = 0;
+        srm_cfg.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+        srm_cfg.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+        float scale_x = (float)CAMERA_APP_ULOG_WIDTH / (float)width;
+        float scale_y = (float)CAMERA_APP_ULOG_HEIGHT / (float)height;
+        srm_cfg.scale_x = scale_x;
+        srm_cfg.scale_y = scale_y;
+        srm_cfg.rgb_swap = 0;
+        srm_cfg.byte_swap = 0;
+        srm_cfg.mode = PPA_TRANS_MODE_BLOCKING;
+
+        /* Handle RGB565X (byte-swapped) input from camera */
+        if (_lvgl_format == LV_COLOR_FORMAT_RGB565_SWAPPED) {
+            srm_cfg.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+            srm_cfg.rgb_swap = 1;  /* PPA will swap bytes */
+        }
+
+        esp_err_t ppa_ret = ppa_do_scale_rotate_mirror((ppa_client_handle_t)_ulog_ppa_client, &srm_cfg);
+        if (ppa_ret == ESP_OK) {
+            encode_input = _ulog_resize_buf;
+            encode_width = CAMERA_APP_ULOG_WIDTH;
+            encode_height = CAMERA_APP_ULOG_HEIGHT;
+        } else {
+            ESP_LOGW(TAG, "PPA downscale for ULog failed: %s", esp_err_to_name(ppa_ret));
+        }
+#endif
+    }
+
+    jpeg_encode_cfg_t enc_cfg = {
+        .height = encode_height,
+        .width = encode_width,
+        .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
+        .sub_sample = JPEG_DOWN_SAMPLING_YUV420,
+        .image_quality = CAMERA_APP_JPEG_QUALITY,
+        .pixel_reverse = false,
+    };
+
+    /* PPA output is native RGB565 (byte-swapped if rgb_swap was used).
+     * If no PPA used and camera outputs RGB565X, set pixel_reverse. */
+    if (encode_input == rgb565_data && _lvgl_format == LV_COLOR_FORMAT_RGB565_SWAPPED) {
+        enc_cfg.pixel_reverse = true;
+    }
+
+    uint32_t inbuf_size = encode_width * encode_height * 2;  /* RGB565: 2 bytes per pixel */
+    esp_err_t ret = jpeg_encoder_process(_jpeg_encoder, &enc_cfg,
+                                          encode_input, inbuf_size,
+                                          _jpeg_out_buf, _jpeg_out_buf_size,
+                                          &jpeg_size);
+
+    if (_jpeg_mutex) xSemaphoreGive(_jpeg_mutex);
+
+    if (ret != ESP_OK || jpeg_size == 0) {
+        static uint32_t enc_fail_count = 0;
+        enc_fail_count++;
+        if (enc_fail_count <= 3 || (enc_fail_count % 100) == 0) {
+            ESP_LOGW(TAG, "JPEG encode failed: %s (count=%u size=%u)",
+                     esp_err_to_name(ret), (unsigned)enc_fail_count, (unsigned)jpeg_size);
+        }
+        return;
+    }
+
+    /* Log first successful encode */
+    static bool first_encode_logged = false;
+    if (!first_encode_logged) {
+        first_encode_logged = true;
+        ESP_LOGI(TAG, "First JPEG encode OK: %ux%u → %u bytes",
+                 (unsigned)encode_width, (unsigned)encode_height, (unsigned)jpeg_size);
+    }
+
+    /* JPEG size must fit in camera_frame_s.jpeg_data[] */
+    if (jpeg_size > sizeof(((camera_frame_s *)0)->jpeg_data)) {
+        ESP_LOGW(TAG, "JPEG frame too large for ULog (%u > %u), skipping",
+                 (unsigned)jpeg_size, (unsigned)sizeof(((camera_frame_s *)0)->jpeg_data));
+        return;
+    }
+
+    /* Lazy-init publisher (atomic CAS prevents double-advertise) */
+    if (_frame_pub.load(std::memory_order_relaxed) < 0) {
+        orb_advert_t new_pub = orb_advertise(ORB_ID(camera_frame));
+        orb_advert_t expected = ORB_ADVERT_INVALID;
+        _frame_pub.compare_exchange_strong(expected, new_pub,
+                std::memory_order_acq_rel, std::memory_order_acquire);
+    }
+    if (_frame_pub.load(std::memory_order_relaxed) < 0) return;
+
+    /* camera_frame_s is ~15KB — too large for app_video task stack.
+     * Allocate from PSRAM heap to avoid stack overflow. */
+    camera_frame_s *frame = (camera_frame_s *)heap_caps_malloc(sizeof(camera_frame_s), MALLOC_CAP_SPIRAM);
+    if (!frame) {
+        ESP_LOGW(TAG, "Failed to allocate camera_frame_s, skipping publish");
+        return;
+    }
+
+    memset(frame, 0, sizeof(*frame));
+    frame->timestamp   = (uint64_t)esp_timer_get_time();
+    frame->frame_index = _frame_count.load(std::memory_order_relaxed);
+    frame->width       = (uint16_t)encode_width;
+    frame->height      = (uint16_t)encode_height;
+    frame->format      = 0;  /* 0 = JPEG */
+    frame->jpeg_size   = (uint16_t)jpeg_size;
+    memcpy(frame->jpeg_data, _jpeg_out_buf, jpeg_size);
+
+    orb_publish(ORB_ID(camera_frame), _frame_pub, frame);
+    heap_caps_free(frame);
+    _ulog_frame_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+ *  HW JPEG encoder init / deinit
+ * ════════════════════════════════════════════════════════════════════ */
+bool CameraApp::_init_jpeg_encoder(void)
+{
+    if (_jpeg_encoder) return true;  /* Already initialized */
+
+    if (!_jpeg_mutex) {
+        _jpeg_mutex = xSemaphoreCreateMutex();
+        if (!_jpeg_mutex) {
+            ESP_LOGE(TAG, "Failed to create JPEG mutex");
+            return false;
+        }
+    }
+
+    /* Create JPEG encoder engine */
+    jpeg_encode_engine_cfg_t eng_cfg = {
+        .intr_priority = 0,
+        .timeout_ms = 100,
+        .flags = {
+            .allow_pd = 0,
+        },
+    };
+
+    esp_err_t ret = jpeg_new_encoder_engine(&eng_cfg, &_jpeg_encoder);
+    if (ret != ESP_OK || !_jpeg_encoder) {
+        ESP_LOGE(TAG, "Failed to create JPEG encoder engine: %s", esp_err_to_name(ret));
+        _jpeg_encoder = nullptr;
+        return false;
+    }
+
+    /* Allocate JPEG output buffer from PSRAM */
+    _jpeg_out_buf_size = CAMERA_APP_JPEG_OUT_BUF_SIZE;
+    jpeg_encode_memory_alloc_cfg_t mem_cfg = {
+        .buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER,
+    };
+    size_t allocated_size = 0;
+    _jpeg_out_buf = (uint8_t *)jpeg_alloc_encoder_mem(_jpeg_out_buf_size, &mem_cfg, &allocated_size);
+    if (!_jpeg_out_buf) {
+        ESP_LOGE(TAG, "Failed to allocate JPEG output buffer (%u bytes)", (unsigned)_jpeg_out_buf_size);
+        jpeg_del_encoder_engine(_jpeg_encoder);
+        _jpeg_encoder = nullptr;
+        return false;
+    }
+    _jpeg_out_buf_size = (uint32_t)allocated_size;
+
+    /* Allocate PPA downscale buffer for ULog (320x240 RGB565 = 153600 bytes) */
+    _ulog_resize_buf = (uint8_t *)heap_caps_aligned_calloc(64, 1,
+                        CAMERA_APP_ULOG_WIDTH * CAMERA_APP_ULOG_HEIGHT * 2,
+                        MALLOC_CAP_SPIRAM);
+    if (!_ulog_resize_buf) {
+        ESP_LOGE(TAG, "Failed to allocate ULog resize buffer");
+        jpeg_del_encoder_engine(_jpeg_encoder);
+        _jpeg_encoder = nullptr;
+        heap_caps_free(_jpeg_out_buf);
+        _jpeg_out_buf = nullptr;
+        return false;
+    }
+
+    /* Register PPA SRM client for ULog downscale */
+#if SOC_PPA_SUPPORTED
+    {
+        ppa_client_config_t ppa_cfg = {
+            .oper_type = PPA_OPERATION_SRM,
+        };
+        ret = ppa_register_client(&ppa_cfg, (ppa_client_handle_t *)&_ulog_ppa_client);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "PPA SRM client for ULog failed (%s), will use CPU fallback", esp_err_to_name(ret));
+            _ulog_ppa_client = nullptr;
+        }
+    }
+#endif
+
+    ESP_LOGI(TAG, "HW JPEG encoder initialized (output buf: %u bytes, ULog resize: %dx%d)",
+             (unsigned)_jpeg_out_buf_size, CAMERA_APP_ULOG_WIDTH, CAMERA_APP_ULOG_HEIGHT);
+    return true;
+}
+
+void CameraApp::_deinit_jpeg_encoder(void)
+{
+    if (_jpeg_mutex) xSemaphoreTake(_jpeg_mutex, portMAX_DELAY);
+
+    if (_ulog_ppa_client) {
+        ppa_unregister_client((ppa_client_handle_t)_ulog_ppa_client);
+        _ulog_ppa_client = nullptr;
+    }
+
+    if (_ulog_resize_buf) {
+        heap_caps_free(_ulog_resize_buf);
+        _ulog_resize_buf = nullptr;
+    }
+
+    if (_jpeg_out_buf) {
+        heap_caps_free(_jpeg_out_buf);
+        _jpeg_out_buf = nullptr;
+        _jpeg_out_buf_size = 0;
+    }
+
+    if (_jpeg_encoder) {
+        jpeg_del_encoder_engine(_jpeg_encoder);
+        _jpeg_encoder = nullptr;
+    }
+
+    if (_jpeg_mutex) xSemaphoreGive(_jpeg_mutex);
 }

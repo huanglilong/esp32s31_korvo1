@@ -55,6 +55,7 @@
 #include "drivers/audio/audio_driver.hpp"
 #include "drivers/audio/audio_ulog_recorder.hpp"
 #include "drivers/bt_audio/bt_audio_driver.hpp"
+#include "drivers/camera/camera_app.hpp"
 #include "drivers/sdcard/sdcard_driver.hpp"
 #include "drivers/system_monitor/system_monitor.hpp"
 #include "ulog_writer.h"
@@ -1872,12 +1873,14 @@ static esp_err_t _api_ulog_status(httpd_req_t *req) {
     cJSON *root = cJSON_CreateObject();
     if (!root) { httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OOM"); return ESP_FAIL; }
     cJSON_AddBoolToObject(root, "running", ulog_writer_get_state(ulog) == ULOG_STATE_RUNNING);
+    cJSON_AddBoolToObject(root, "camera_streaming", CameraApp::instance().streaming());
+    cJSON_AddNumberToObject(root, "camera_frame_count", (double)CameraApp::instance().frameCount());
     const char *fp = ulog_writer_get_filepath(ulog);
     cJSON_AddStringToObject(root, "filepath", fp ? fp : "");
     cJSON_AddNumberToObject(root, "bytes_written", (double)ulog_writer_get_bytes_written(ulog));
     const char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
-    if (json) { httpd_resp_sendstr(req, json); cJSON_free((void *)json); }
+    if (json) { httpd_resp_sendstr(req, json); cJSON_free((void*)json); }
     else httpd_resp_sendstr(req, "{}");
     cJSON_Delete(root);
     return ESP_OK;

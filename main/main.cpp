@@ -317,6 +317,7 @@ static void _init_ulog() {
         ulog_writer_add_topic(writer, ORB_ID(system_stats), 5000);
         ulog_writer_add_topic(writer, ORB_ID(volume_state), 1000);
         ulog_writer_add_topic(writer, ORB_ID(audio_frame), 30);
+        ulog_writer_add_topic(writer, ORB_ID(camera_frame), 200);  /* 200ms = 5fps, matches CAMERA_APP_TARGET_FPS */
 
         ESP_LOGI(TAG, "ULog writer initialized (will auto-start after SNTP sync)");
     } else {

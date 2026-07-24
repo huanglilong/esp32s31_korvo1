@@ -58,7 +58,8 @@
 |---|------|------|:----:|
 | E1 | **DVP 摄像头驱动** | OV3660 初始化, DVP 并行接口图像采集 | ✅ 已完成 (driver only) |
 | E2 | **Camera App (LCD 预览)** | Camera 图像实时在 LCD 上显示 (V4L2 + LVGL canvas) | ✅ 已完成 |
-| E3 | **JPEG 编码** | 硬件 JPEG Codec, 图像压缩存储 | ⏳ 待开发 |
+| E3 | **JPEG 编码** | 硬件 JPEG Codec, 图像压缩存储 | ✅ 已完成 (Camera ULog 录制) |
+| E3a | **Camera ULog 录制** | Camera 流式传输时持续 JPEG 编码 → camera_frame uORB → ULog (.ulg), HW JPEG encoder (RGB565→JPEG quality 30), 5fps | ✅ 已完成 |
 | E4 | **人脸检测** | 可选 ESP-DL 人脸检测模型 | ⏳ 待开发 |
 
 ### 2.6 网络功能
@@ -110,6 +111,7 @@
 
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
+| 2026-07-24 | v0.13.0 | **Camera ULog 持续录制**: 参考 esp32p4_monitor, 在 CameraApp 中集成 HW JPEG 编码, 流式传输时持续将每帧 JPEG 编码后发布到 camera_frame uORB topic → ULog writer 写入 .ulg 文件。使用 ESP32-S31 HW JPEG Codec (RGB565→JPEG quality 30), 5fps (200ms 间隔), JPEG 输出缓冲区 32KB。JPEG encoder 互斥锁保护 (frame callback vs deinit)。camera_frame_s 从 PSRAM 分配避免栈溢出。注册 `ORB_ID(camera_frame)` topic 到 ULog writer (200ms 间隔)。无独立开关, Camera 流式传输时一直录制。 |
 | 2026-07-24 | v0.12.0 | **Audio ULog 持续录制**: 新增 AudioUlogRecorder 模块, ULog 启动后自动持续录制音频 (I2S Mic → AAC-ADTS 编码 → audio_frame uORB → ULog .ulg 文件)。新增 `proto/audio_frame.msg` topic (1KB AAC-ADTS buffer, 实际帧 ~512B)。新增 `tools/ulog_audio_extract.py` PC 端工具, 从 .ulg 文件提取 AAC 音频输出 .aac 文件。与 .aac 录制/播放互斥 (共享 I2S)。AAC 参数: 16kHz/stereo/64kbps/ADTS。**uORB 修复**: `orb_subscribe()` 对大 topic (>256B) 使用 `xQueueCreateStatic` + PSRAM 分配 queue storage, 修复内部 SRAM 不足导致订阅失败。**性能优化**: audio_frame buffer 从 8KB 降至 1KB (实际 AAC 帧 ~512B), ULog 写入速率从 ~125KB/s 降至 ~16KB/s, 消除 Web 页面卡顿。 |
 | 2026-07-24 | v0.11.9 | **Code Review Round 3 — 3 fixes**: (1) Fix `shared_mdns_release()` missing `netbiosns_stop()` — NetBIOS name service socket (port 137/138) leaked on mDNS deinit. (2) Fix `BtAudioDriver` `_device_name` always empty — added discovery name cache (up to 4 devices, LRU eviction) that stores names from `ESP_BT_AUDIO_EVENT_DEVICE_DISCOVERED` and looks up by address on connect. (3) Fix `_api_audio_list()` Content-Type mismatch — returns HTML error page instead of JSON on SD card unavailable / OOM errors. Build 通过。 |
 | 2026-07-22 | v0.11.9 | **PSRAM 优化 + 4 个 bugfix**: (1) **LVGL draw buffer 迁移到 PSRAM**: 释放 ~40KB 内部 SRAM 给 WiFi/Bluetooth 协议栈, 降低 OOM 风险。`CONFIG_LVGL_DRAW_BUF_PSRAM=y`。 (2) **Fix 数据竞争 `s_playing_file`**: `_asp_evt` 回调中 `s_playing_file` 被多个任务 (A2DP 回调 + Web API handler) 并发读写, 添加 `std::atomic` 保护。 (3) **Fix 缺少 Content-Type**: `_api_files_list` 错误响应缺少 `Content-Type: application/json` header, 导致客户端解析失败。 (4) **重构: 移除冗余 `opendir('/sdcard')`**: `_api_files_list` 中 `file_list` 内部已包含 `/sdcard/` 前缀, 外层 `opendir` 重复。 |
