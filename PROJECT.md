@@ -63,7 +63,7 @@ esp32s31_korvo1/
 │   │   ├── camera/
 │   │   │   ├── camera_driver.hpp   # CameraDriver — OV3660 DVP 摄像头
 │   │   │   ├── camera_driver.cpp
-│   │   │   ├── camera_app.hpp      # CameraApp — 摄像头 LCD 预览 + JPEG ULog 录制 (V4L2 + HW JPEG → camera_frame uORB)
+│   │   │   ├── camera_app.hpp      # CameraApp — 摄像头 ULog 持续录制 (V4L2 → PPA downscale+rotate → HW JPEG → camera_frame uORB)
 │   │   │   └── camera_app.cpp
 │   │   └── system_monitor/
 │   │       ├── system_monitor.hpp  # SystemMonitor — CPU/内存采样 + uORB

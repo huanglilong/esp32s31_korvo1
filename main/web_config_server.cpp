@@ -1874,7 +1874,7 @@ static esp_err_t _api_ulog_status(httpd_req_t *req) {
     if (!root) { httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OOM"); return ESP_FAIL; }
     cJSON_AddBoolToObject(root, "running", ulog_writer_get_state(ulog) == ULOG_STATE_RUNNING);
     cJSON_AddBoolToObject(root, "camera_streaming", CameraApp::instance().streaming());
-    cJSON_AddNumberToObject(root, "camera_frame_count", (double)CameraApp::instance().frameCount());
+    cJSON_AddNumberToObject(root, "camera_ulog_frames", (double)CameraApp::instance().ulogFrameCount());
     const char *fp = ulog_writer_get_filepath(ulog);
     cJSON_AddStringToObject(root, "filepath", fp ? fp : "");
     cJSON_AddNumberToObject(root, "bytes_written", (double)ulog_writer_get_bytes_written(ulog));

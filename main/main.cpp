@@ -462,16 +462,15 @@ extern "C" void app_main(void) {
         ESP_LOGW(TAG, "Display driver not available (LCD subboard not connected?)");
     }
 
-    /* 12. Initialize Camera App (camera streaming to LCD, optional) */
-    if (display_ret == 0 && cam_ret == 0) {
-        ESP_LOGI(TAG, "Initializing Camera App...");
+    /* 12. Initialize Camera App (ULog recording only, no LCD display) */
+    if (cam_ret == 0) {
+        ESP_LOGI(TAG, "Initializing Camera App (ULog recording)...");
         int cam_app_ret = CameraApp::instance().init();
         if (cam_app_ret == 0) {
-            /* Claim camera hardware */
             if (CameraDriver::instance().claim("CameraApp")) {
                 int start_ret = CameraApp::instance().start();
                 if (start_ret == 0) {
-                    ESP_LOGI(TAG, "Camera App streaming (%" PRIu32 "x%" PRIu32 ")",
+                    ESP_LOGI(TAG, "Camera ULog recording started (%" PRIu32 "x%" PRIu32 ")",
                              CameraApp::instance().frameWidth(),
                              CameraApp::instance().frameHeight());
                 } else {
@@ -479,7 +478,7 @@ extern "C" void app_main(void) {
                     CameraDriver::instance().release("CameraApp");
                 }
             } else {
-                ESP_LOGW(TAG, "Camera hardware claimed by another module, skipping preview");
+                ESP_LOGW(TAG, "Camera hardware claimed by another module, skipping");
             }
         } else {
             ESP_LOGW(TAG, "Camera App init failed (no camera connected?)");
