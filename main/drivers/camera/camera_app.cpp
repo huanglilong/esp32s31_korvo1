@@ -156,6 +156,37 @@ int CameraApp::init() {
         }
     }
 
+    /* Step 3b: Query sensor frame rate for recording ratio calculation.
+     * DVP driver does not implement VIDIOC_S_PARM, so we cannot change
+     * the sensor frame rate at runtime. Instead, we keep the sensor at
+     * its native rate (e.g. 10fps) and use frame-skip counting in the
+     * callback to record at the target FPS (e.g. 5fps = every 2nd frame).
+     * This avoids the V4L2 buffer-waste problem where skipping frames
+     * by returning early from the callback wastes capture time. */
+    {
+        struct v4l2_streamparm sparm = {};
+        sparm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        if (ioctl(_video_fd, VIDIOC_G_PARM, &sparm) == 0) {
+            _sensor_fps = (float)sparm.parm.capture.timeperframe.denominator
+                        / (float)sparm.parm.capture.timeperframe.numerator;
+            ESP_LOGI(TAG, "Sensor frame rate: %.1f fps (num=%u den=%u)",
+                     _sensor_fps,
+                     (unsigned)sparm.parm.capture.timeperframe.numerator,
+                     (unsigned)sparm.parm.capture.timeperframe.denominator);
+        } else {
+            _sensor_fps = 10.0f;  /* Default for OV3660 640x480 YUYV */
+            ESP_LOGW(TAG, "VIDIOC_G_PARM failed, assuming %.0f fps", _sensor_fps);
+        }
+
+        /* Calculate frame-skip ratio: record every N-th frame.
+         * E.g. 10fps sensor / 5fps target = skip_ratio 2 (record every 2nd frame).
+         * Round up to ensure we don't exceed target FPS. */
+        _record_skip_ratio = (uint32_t)(_sensor_fps / CAMERA_APP_TARGET_FPS + 0.5f);
+        if (_record_skip_ratio < 1) _record_skip_ratio = 1;
+        ESP_LOGI(TAG, "ULog recording: every %u frame(s) (%.1f fps sensor → %d fps target)",
+                 (unsigned)_record_skip_ratio, _sensor_fps, CAMERA_APP_TARGET_FPS);
+    }
+
     /* Step 4: Initialize HW JPEG encoder + PPA client for ULog recording */
     ESP_LOGI(TAG, "Step 4: Initializing HW JPEG encoder + PPA...");
     if (!_init_jpeg_encoder()) {
@@ -315,21 +346,30 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t /*camera_buf_index*
         self._frame_height = camera_buf_ves;
     }
 
-    /* FPS throttle: skip frames to reduce CPU load */
-    {
-        int64_t now_us = esp_timer_get_time();
-        int64_t frame_interval_us = 1000000LL / CAMERA_APP_TARGET_FPS;
-        if ((now_us - self._last_frame_us) < frame_interval_us) {
-            return;
-        }
-        self._last_frame_us = now_us;
+    /* Frame-skip recording: sensor runs at native rate (e.g. 10fps),
+     * but we only JPEG-encode and publish every N-th frame for ULog
+     * recording at the target FPS (e.g. 5fps = every 2nd frame).
+     *
+     * IMPORTANT: We must NOT skip by returning early from the callback,
+     * because the V4L2 buffer has already been dequeued (DQBUF) at this
+     * point. Returning early would just QBUF the buffer back, but the
+     * sensor still needs ~100ms to capture the next frame into it,
+     * wasting capture time and causing actual FPS to drop well below
+     * the target (e.g. 3.7fps instead of 5fps).
+     *
+     * Instead, we always let the V4L2 loop proceed (DQBUF → callback →
+     * QBUF) at the sensor's native rate, and only skip the expensive
+     * PPA+JPEG+publish work for non-recording frames. This keeps the
+     * V4L2 pipeline flowing at full speed. */
+    uint32_t frame_idx = self._frame_count.fetch_add(1, std::memory_order_relaxed);
+    bool should_record = (frame_idx % self._record_skip_ratio) == 0;
+
+    if (should_record) {
+        self._publish_camera_frame(camera_buf, camera_buf_hes, camera_buf_ves);
     }
 
-    /* Publish camera_frame for ULog recording */
-    self._publish_camera_frame(camera_buf, camera_buf_hes, camera_buf_ves);
-
-    /* FPS tracking */
-    uint32_t count = self._frame_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    /* FPS tracking (counts all sensor frames, not just recorded ones) */
+    uint32_t count = frame_idx + 1;
     int64_t now = esp_timer_get_time();
     int64_t elapsed = now - self._fps_last_time;
     if (elapsed >= 1000000) {
@@ -355,11 +395,12 @@ void CameraApp::_frame_callback(uint8_t *camera_buf, uint8_t /*camera_buf_index*
         self._fps_last_count = count;
         self._fps_last_time = now;
 
-        ESP_LOGD(TAG, "FPS: %.1f (frames: %" PRIu32 ")", fps, count);
+        ESP_LOGD(TAG, "Sensor FPS: %.1f (frames: %" PRIu32 ")", fps, count);
         if ((count / 10) % 6 == 0) {
-            ESP_LOGI(TAG, "Camera recording: %.1f fps, %" PRIu32 " frames, ulog: %u, heap: %" PRIu32 " KB",
+            ESP_LOGI(TAG, "Camera: %.1f sensor fps, %" PRIu32 " frames, ulog: %u (%.1f fps), heap: %" PRIu32 " KB",
                      fps, count,
                      (unsigned)self._ulog_frame_count.load(std::memory_order_relaxed),
+                     fps / (float)self._record_skip_ratio,
                      (uint32_t)(esp_get_free_heap_size() / 1024));
         }
     }

@@ -3,7 +3,7 @@
 /*
  * CameraApp — Continuous camera ULog frame recording.
  *
- * Captures DVP camera frames (OV3660) via V4L2 (/dev/video0),
+ * Captures DVP camera frames (OV3660) via V4L2 (/dev/video2),
  * JPEG-encodes them using HW JPEG codec, and publishes camera_frame
  * uORB topics for ULog writer to record to .ulg files on SD card.
  *
@@ -13,6 +13,14 @@
  *
  * PPA performs: 640x480 YUV422 YUYV → 180° rotate + downscale → 320x240 YUV420
  * HW JPEG encodes: 320x240 YUV420 → JPEG (quality 45, YUV420 subsampling, ~4-10KB per frame)
+ *
+ * Frame rate strategy:
+ *   Sensor runs at native rate (10fps for OV3660 640x480 YUYV).
+ *   ULog recording uses frame-skip counting: only JPEG-encode and publish
+ *   every N-th frame (e.g. every 2nd frame = 5fps recording from 10fps sensor).
+ *   This keeps the V4L2 pipeline flowing at full speed — skipping frames by
+ *   returning early from the callback would waste V4L2 buffer capture time
+ *   and cause actual FPS to drop well below the target.
  *
  * No LCD display — CameraApp is ULog recording only.
  * Mutual exclusion: uses CameraDriver claim/release via uORB camera_state.
@@ -31,7 +39,7 @@
 
 /* ── Constants ──────────────────────────────────────────────────── */
 
-#define CAMERA_APP_NUM_V4L2_BUFS   2     /* Double-buffering for V4L2 */
+#define CAMERA_APP_NUM_V4L2_BUFS   3     /* Triple-buffering for V4L2 (improves pipeline throughput) */
 #define CAMERA_APP_TASK_STACK_SIZE (6 * 1024)
 #define CAMERA_APP_TASK_PRIORITY   5
 #define CAMERA_APP_TASK_CORE       0     /* Run on HP core (Core 0) */
@@ -144,13 +152,16 @@ private:
     /* Camera outputs RGB565X (byte-swapped) — flag for PPA byte_swap */
     bool                  _rgb565x_input;
 
+    /* Frame-skip recording: sensor runs at native rate, record every N-th frame */
+    float                 _sensor_fps{10.0f};       /* Sensor native FPS (from VIDIOC_G_PARM) */
+    uint32_t              _record_skip_ratio{2};     /* Record every N-th frame (sensor_fps / target_fps) */
+
     /* FPS tracking */
     std::atomic<uint32_t> _frame_count;
     std::atomic<uint32_t> _ulog_frame_count{0};
     std::atomic<float>    _fps;
     uint32_t              _fps_last_count;    /* Protected by _mutex */
     int64_t               _fps_last_time;     /* Protected by _mutex */
-    int64_t               _last_frame_us{0};  /* Frame throttle timestamp */
 
     /* uORB */
     std::atomic<orb_advert_t> _pub_state{ORB_ADVERT_INVALID};
