@@ -72,6 +72,25 @@ This workflow is tested and supported on **both macOS and Linux**:
 ./tools/esp32_debug.sh -n
 ```
 
+## Pytest Integration During Capture
+
+**During the capture phase**, also run the test suite to verify functionality end-to-end:
+
+```bash
+# Terminal 1: start capture with extended duration (tests may take 2–5 minutes)
+./tools/esp32_debug.sh capture -t 300
+
+# Terminal 2: run pytest while capture is running
+pytest tests --base-url=http://esp-web.local:8080 -v
+```
+
+**Key points:**
+
+- The capture duration (`-t`) must be long enough to cover the full test run. Default 40s is too short — use **`-t 300`** (5 minutes) as a safe default for the full suite.
+- Capture continues until the timer expires, so start pytest promptly after capture begins.
+- If pytest finishes early, the remaining capture time still logs device state — useful for spotting post-test issues.
+- If pytest fails, check the captured log for errors that correlate with the failure.
+
 ## How It Works
 
 ### Serial Port Auto-Detection

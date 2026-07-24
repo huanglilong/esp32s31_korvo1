@@ -114,7 +114,7 @@ When `idf.py monitor` is unavailable, use the automated debug script:
 ./tools/esp32_debug.sh filter -k wifi,audio  # Filter saved logs
 ```
 
-See [esp32_debug_workflow.md](.github/esp32_debug_workflow.md) for full documentation.
+See [esp32_debug_workflow.md](.github/esp32_debug_workflow.md) for full documentation, including pytest integration during capture.
 
 ---
 
@@ -133,7 +133,7 @@ See [esp32_debug_workflow.md](.github/esp32_debug_workflow.md) for full document
 
 ## 6. Git Rules
 
-1. **Every commit must be approved by user**
+1. **Every commit must be approved by user** — except during **Code Review & Fix Workflow** (§7), where auto-commit is allowed
 2. **git push is forbidden** — never push without explicit request
 3. **One issue, one commit** — each commit addresses exactly ONE issue/feature/bugfix
 4. **Commit messages**: clear, concise, in English, with **root cause and summary of what was done and why**
@@ -143,13 +143,18 @@ See [esp32_debug_workflow.md](.github/esp32_debug_workflow.md) for full document
 
 ## 7. Code Review & Fix Workflow
 
-1. Review for issues and improvements
+1. **Review scope** — check for:
+   - Bugs, logic errors, and potential improvements
+   - Modularity — ensure code is well-structured with clear responsibilities
+   - Redundancy — identify and eliminate duplicate or dead code
 2. **One issue, one commit** — fix each in its own commit
-3. After fixing, run another review; repeat up to **2 rounds max**
-4. If issues remain after 2 rounds, report to user
-5. Update all relevant `*.md` docs
-6. Flash to device and monitor logs to verify
-7. After all issues resolved, run **4.2 Debug Workflow (no TTY)** to verify functionality
+3. **Auto-commit allowed** — no user approval needed for commits within this workflow (exception to §6.1)
+4. **Build before commit** — run `idf.py build` before every commit to ensure code compiles cleanly
+5. **Review → Fix → Commit cycle** (repeat up to 2 times):
+   - Review all issues → fix all → commit each fix → build-verify each commit
+   - If issues found in round 2, fix and commit as in round 1
+6. Update all relevant `*.md` docs
+7. After all review rounds complete, run **§4.2 Debug Workflow (no TTY)** to verify functionality end-to-end
 
 ---
 
