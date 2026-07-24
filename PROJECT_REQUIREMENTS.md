@@ -59,7 +59,7 @@
 | E1 | **DVP 摄像头驱动** | OV3660 初始化, DVP 并行接口图像采集 | ✅ 已完成 (driver only) |
 | E2 | **Camera App (LCD 预览)** | Camera 图像实时在 LCD 上显示 (V4L2 + LVGL canvas) | ❌ 已移除 (改为 ULog 录制) |
 | E3 | **JPEG 编码** | 硬件 JPEG Codec, 图像压缩存储 | ✅ 已完成 (Camera ULog 录制) |
-| E3a | **Camera ULog 录制** | Camera 流式传输时持续 JPEG 编码 → camera_frame uORB → ULog (.ulg), PPA downscale+rotate180°+byte-swap (RGB565X→RGB565), HW JPEG encoder (RGB565→JPEG quality 30), 5fps | ✅ 已完成 |
+| E3a | **Camera ULog 录制** | Camera 流式传输时持续 JPEG 编码 → camera_frame uORB → ULog (.ulg), OV3660 YUV422 YUYV output → PPA downscale+rotate180°+chroma subsample (YUV422→YUV420) → HW JPEG encoder (YUV420→JPEG quality 45), 5fps. ⚠️ JPEG YUV420 要求输出分辨率宽高均为 16 的倍数 (320×240 满足) | ✅ 已完成 |
 | E4 | **人脸检测** | 可选 ESP-DL 人脸检测模型 | ⏳ 待开发 |
 
 ### 2.6 网络功能

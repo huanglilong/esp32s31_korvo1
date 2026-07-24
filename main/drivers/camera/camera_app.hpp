@@ -11,8 +11,8 @@
  *   OV3660 → DVP parallel → ESP32-S31 → V4L2 → PPA (downscale + rotate 180°)
  *   → HW JPEG encode → camera_frame uORB → ULogWriter → SD card
  *
- * PPA performs: 640x480 YUV422 YUYV → 180° rotate + downscale → 320x240 YUV422
- * HW JPEG encodes: 320x240 YUV422 → JPEG (quality 45, YUV422 subsampling, ~4-10KB per frame)
+ * PPA performs: 640x480 YUV422 YUYV → 180° rotate + downscale → 320x240 YUV420
+ * HW JPEG encodes: 320x240 YUV420 → JPEG (quality 45, YUV420 subsampling, ~4-10KB per frame)
  *
  * No LCD display — CameraApp is ULog recording only.
  * Mutual exclusion: uses CameraDriver claim/release via uORB camera_state.
@@ -37,7 +37,7 @@
 #define CAMERA_APP_TASK_CORE       0     /* Run on HP core (Core 0) */
 #define CAMERA_APP_TARGET_FPS      5     /* Target frame rate */
 #define CAMERA_APP_JPEG_QUALITY    45    /* JPEG quality for ULog recording (1-100) */
-#define CAMERA_APP_JPEG_OUT_BUF_SIZE (10 * 1024)  /* 10KB JPEG output buffer (320x240 q30 ≤10KB) */
+#define CAMERA_APP_JPEG_OUT_BUF_SIZE (7 * 1024)   /* 7KB JPEG output buffer (320x240 q45 max 4688 bytes) */
 #define CAMERA_APP_ULOG_WIDTH      320   /* Downscaled width for ULog JPEG encoding */
 #define CAMERA_APP_ULOG_HEIGHT     240   /* Downscaled height for ULog JPEG encoding */
 

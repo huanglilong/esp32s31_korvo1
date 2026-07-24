@@ -5,8 +5,8 @@
  * JPEG-encodes them using HW JPEG codec, and publishes camera_frame
  * uORB topics for ULog writer to record to .ulg files on SD card.
  *
- * PPA pipeline: 640x480 YUV422 YUYV → 180° rotate + downscale → 320x240 YUV422
- * JPEG pipeline: 320x240 YUV422 → HW JPEG (quality 45, YUV422 subsampling) → ~4-10KB per frame
+ * PPA pipeline: 640x480 YUV422 YUYV → 180° rotate + downscale → 320x240 YUV420
+ * JPEG pipeline: 320x240 YUV420 → HW JPEG (quality 45, YUV420 subsampling) → ~4-10KB per frame
  *
  * ESP32-S31 hardware notes:
  *   - PPA (Pixel Processing Accelerator) for HW scaling + rotation + byte-swap
@@ -377,8 +377,8 @@ void CameraApp::_stream_task(void * /*arg*/) {
  *
  *  PPA pipeline (single SRM operation):
  *    Input:  640x480 YUV422 YUYV (from OV3660)
- *    PPA:    rotate 180° + downscale to 320x240 → YUV422
- *    Output: 320x240 YUV422 → HW JPEG encode
+ *    PPA:    rotate 180° + downscale to 320x240 → YUV420 (chroma subsampled 4:2:2→4:2:0)
+ *    Output: 320x240 YUV420 → HW JPEG encode
  *
  *  180° rotation: OV3660 is mounted upside-down on Korvo-1 board.
  *  BSP_CAMERA_ROTATION=180 confirms this.
@@ -420,16 +420,19 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
         srm_cfg.in.block_offset_y = 0;
 
         srm_cfg.out.buffer = _ulog_resize_buf;
-        srm_cfg.out.buffer_size = CAMERA_APP_ULOG_WIDTH * CAMERA_APP_ULOG_HEIGHT * 2;
+        srm_cfg.out.buffer_size = CAMERA_APP_ULOG_WIDTH * CAMERA_APP_ULOG_HEIGHT * 3 / 2;  /* YUV420: 1.5 B/pixel */
         srm_cfg.out.pic_w = CAMERA_APP_ULOG_WIDTH;
         srm_cfg.out.pic_h = CAMERA_APP_ULOG_HEIGHT;
         srm_cfg.out.block_offset_x = 0;
         srm_cfg.out.block_offset_y = 0;
 
         if (is_yuv_input) {
-            /* YUV422 YUYV input → PPA rotate + downscale → YUV422 output */
+            /* YUV422 YUYV input → PPA rotate + downscale → YUV420 output
+             * PPA internally converts YUV422→RGB→process→RGB→YUV420,
+             * performing chroma subsampling (4:2:2 → 4:2:0) during output conversion.
+             * YUV420 output reduces buffer size by 25% vs YUV422 (1.5 vs 2 B/pixel). */
             srm_cfg.in.srm_cm = PPA_SRM_COLOR_MODE_YUV422_YUYV;
-            srm_cfg.out.srm_cm = PPA_SRM_COLOR_MODE_YUV422_YUYV;
+            srm_cfg.out.srm_cm = PPA_SRM_COLOR_MODE_YUV420;
             srm_cfg.in.yuv_range = PPA_COLOR_RANGE_LIMIT;
             srm_cfg.in.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
             srm_cfg.out.yuv_range = PPA_COLOR_RANGE_LIMIT;
@@ -481,8 +484,8 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
     enc_cfg.height = encode_height;
     enc_cfg.width = encode_width;
     if (is_yuv_input) {
-        enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_YUV422;
-        enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
+        enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_YUV420;
+        enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV420;
     } else {
         enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
         enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV420;
@@ -497,8 +500,8 @@ void CameraApp::_publish_camera_frame(uint8_t *rgb565_data, uint32_t width, uint
     }
 
     uint32_t inbuf_size = is_yuv_input
-        ? (encode_width * encode_height * 2)   /* YUV422: 2 bytes/pixel */
-        : (encode_width * encode_height * 2);  /* RGB565: 2 bytes/pixel */
+        ? (encode_width * encode_height * 3 / 2)  /* YUV420: 1.5 bytes/pixel */
+        : (encode_width * encode_height * 2);      /* RGB565: 2 bytes/pixel */
     esp_err_t ret = jpeg_encoder_process(_jpeg_encoder, &enc_cfg,
                                           encode_input, inbuf_size,
                                           _jpeg_out_buf, _jpeg_out_buf_size,
@@ -608,9 +611,9 @@ bool CameraApp::_init_jpeg_encoder(void)
     }
     _jpeg_out_buf_size = (uint32_t)allocated_size;
 
-    /* Allocate PPA downscale buffer for ULog (320x240 RGB565 = 153600 bytes) */
+    /* Allocate PPA downscale buffer for ULog (320x240 YUV420 = 115200 bytes) */
     _ulog_resize_buf = (uint8_t *)heap_caps_aligned_calloc(64, 1,
-                        CAMERA_APP_ULOG_WIDTH * CAMERA_APP_ULOG_HEIGHT * 2,
+                        CAMERA_APP_ULOG_WIDTH * CAMERA_APP_ULOG_HEIGHT * 3 / 2,
                         MALLOC_CAP_SPIRAM);
     if (!_ulog_resize_buf) {
         ESP_LOGE(TAG, "Failed to allocate ULog resize buffer");
@@ -621,7 +624,7 @@ bool CameraApp::_init_jpeg_encoder(void)
         return false;
     }
 
-    /* Register PPA SRM client for ULog downscale + rotate + byte-swap */
+    /* Register PPA SRM client for ULog downscale + rotate */
 #if SOC_PPA_SUPPORTED
     {
         ppa_client_config_t ppa_cfg = {
